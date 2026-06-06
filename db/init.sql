@@ -190,6 +190,26 @@ CREATE TABLE `pay_record` (
   KEY `idx_order` (`order_no`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='支付流水表';
 
+-- ============================================================
+--  10. 通知日志表（service-notification 阶段九新增）
+-- ============================================================
+DROP TABLE IF EXISTS `notification_log`;
+CREATE TABLE `notification_log` (
+  `id`          BIGINT       NOT NULL                                COMMENT '雪花ID',
+  `order_no`    VARCHAR(32)  NOT NULL                                COMMENT '订单号',
+  `type`        TINYINT      NOT NULL                                COMMENT '0-支付成功 1-订单取消 2-订单超时关闭',
+  `channel`     VARCHAR(20)  NOT NULL DEFAULT 'LOG'                  COMMENT 'LOG/SMS/EMAIL',
+  `receiver`    VARCHAR(100) DEFAULT NULL                            COMMENT '接收方（手机号/邮箱/demo-user）',
+  `content`     VARCHAR(500) NOT NULL                                COMMENT '通知内容',
+  `status`      TINYINT      NOT NULL DEFAULT 0                      COMMENT '0-成功 1-失败',
+  `retry_count` INT          NOT NULL DEFAULT 0                      COMMENT '重试次数',
+  `error_msg`   VARCHAR(500) DEFAULT NULL                            COMMENT '失败原因',
+  `create_time` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_order` (`order_no`),
+  KEY `idx_type_create` (`type`, `create_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='通知发送日志';
+
 SET FOREIGN_KEY_CHECKS = 1;
 
 -- ============================================================

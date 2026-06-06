@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.railway.notification.mapper.NotificationLogMapper">
+
+    <resultMap id="BaseResultMap" type="com.railway.notification.entity.NotificationLogDO">
+        <id     property="id"         column="id"/>
+        <result property="orderNo"    column="order_no"/>
+        <result property="type"       column="type"/>
+        <result property="channel"    column="channel"/>
+        <result property="receiver"   column="receiver"/>
+        <result property="content"    column="content"/>
+        <result property="status"     column="status"/>
+        <result property="retryCount" column="retry_count"/>
+        <result property="errorMsg"   column="error_msg"/>
+        <result property="createTime" column="create_time"/>
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        id, order_no, type, channel, receiver, content,
+        status, retry_count, error_msg, create_time
+    </sql>
+
+    <insert id="insert" parameterType="com.railway.notification.entity.NotificationLogDO">
+        INSERT INTO notification_log (
+            id, order_no, type, channel, receiver, content,
+            status, retry_count, error_msg, create_time
+        ) VALUES (
+            #{id}, #{orderNo}, #{type}, #{channel}, #{receiver}, #{content},
+            #{status}, #{retryCount}, #{errorMsg}, #{createTime}
+        )
+    </insert>
+
+    <select id="selectById" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM notification_log
+        WHERE id = #{id}
+    </select>
+
+</mapper>

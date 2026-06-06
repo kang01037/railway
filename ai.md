@@ -45,14 +45,14 @@
 | 6 | service-ticket（13 源文件，票号 + 状态机） | ✅ 完成 | `service-ticket/pom.xml`, `TicketApplication.java` |
 | 7 | service-payment（11 源文件，模拟支付 + MQ order.paid） | ✅ 完成 | `service-payment/pom.xml`, `PaymentApplication.java` |
 | 8 | service-order（Feign 编排 + RabbitMQ 延迟关单 + 幂等键） | ✅ 完成（38 源文件，jar 81.5MB） | dev 文档 §11 |
-| 9 | service-notification（MQ 消费者） | ⏳ **下一个** | dev 文档 §12 |
-| 10 | service-search（ES 检索） | ⏳ | dev 文档 §13 |
+| 9 | service-notification（MQ 消费者 + 通知日志表） | ✅ 完成（10 源文件，jar 67.6MB） | dev 文档 §12 |
+| 10 | service-search（ES 检索） | ⏳ **下一个** | dev 文档 §13 |
 | 11 | 联调 / 压测 | ⏳ | dev 文档 §14 |
 
-**当前可构建**：common + gateway + service-user + service-train-stock + service-ticket + service-payment + service-order（7 个模块）。
+**当前可构建**：common + gateway + service-user + service-train-stock + service-ticket + service-payment + service-order + service-notification（8 个模块）。
 ```bash
-mvn -pl common,gateway,service-user,service-train-stock,service-ticket,service-payment,service-order -am clean package -DskipTests
-→ 7/7 BUILD SUCCESS
+mvn -pl common,gateway,service-user,service-train-stock,service-ticket,service-payment,service-order,service-notification -am clean package -DskipTests
+→ 8/8 BUILD SUCCESS
 ```
 
 ---
@@ -586,24 +586,79 @@ payment.callback ─order.paid─▶ orderExchange ─▶ orderPaidQueue
 
 ---
 
-## 9. 接下来要做（**阶段 9：service-notification**）
+## 8f. service-notification（已实现 / Stage 9）
 
-参考 `开发文档.md` §12。核心目标：**纯 MQ 消费者**，无 HTTP Controller。
+> 路径 `service-notification/src/main/java/com/railway/notification/`，包名 `com.railway.notification`，**port 9106, snowflake worker-id=6**。
+> **纯 MQ 消费者**，无 HTTP Controller。**不接真短信/邮件服务**，仅打日志 + 落库。
+
+### 8f.1 模块定位
+- 唯一职责：监听 `order.paid.queue` / `order.cancel.queue`，发"通知"（demo = log），落 `notification_log` 表。
+- 不开放 HTTP 接口 → 鉴权拦截器、Nacos config、Redis、雪花业务 ID 生成均**无业务场景**；雪花 bean 仅为了 NotificationLogDO 主键。
+- web 依赖只为 `WebAutoConfiguration` 在 servlet 条件下加载 → `@MapperScan` 生效。
+
+### 8f.2 包结构（10 源文件）
+| 路径 | 文件 | 作用 |
+|---|---|---|
+| `NotificationApplication.java` | 入口 | port 9106，@EnableDiscoveryClient |
+| `config/RabbitConfig.java` | MQ 声明 | 重声明 `orderExchange` + `orderPaidQueue` + `orderCancelQueue`（RabbitAdmin 幂等 noop）+ Jackson + RabbitTemplate |
+| `consumer/OrderPaidNotificationConsumer.java` | @RabbitListener | 收 `order.paid` → 调 NotificationService.onOrderPaid |
+| `consumer/OrderCancelNotificationConsumer.java` | @RabbitListener | 收 `order.cancel`（来自 DLX）→ 调 NotificationService.onOrderCancel |
+| `service/NotificationService.java` + `impl` | 业务 | 翻译消息为通知文本 + 落库（saveLog） |
+| `entity/NotificationLogDO.java` | 实体 | 10 字段：id / orderNo / type / channel / receiver / content / status / retryCount / errorMsg / createTime |
+| `mapper/NotificationLogMapper.java` + XML | DAO | insert / selectById |
+
+### 8f.3 通知格式（demo）
+- **支付成功**（type=0）：`【铁路购票】您订单 O123... 支付成功，金额 ¥xxx，请提前到站取票。`
+- **订单取消**（type=1）：`【铁路购票】您订单 O123... 已取消（超时未支付 / 主动取消），已释放库存。`
+- channel 固定 `LOG`，receiver 固定 `demo-user`（生产应调 UserFeign.getEmail(userId) 拿真实收件人）。
+
+### 8f.4 消费者失败策略
+- `spring.rabbitmq.listener.simple.retry.enabled: true` + `max-attempts: 3` + `initial-interval: 2s` + `multiplier: 2`。
+- 重试耗尽后消息丢弃（不接 DLQ，本期 demo 简化）；落库失败 → 仍 ACK（不让主流程卡住），`log.error` 告警。
+- **生产化建议**：DLQ 持久化 + 定时 job 重投；channel 接真短信（腾讯云 / 阿里云）；receiver 经 UserFeign 反查。
+
+### 8f.5 DB 新增表（`db/init.sql` §9.5 追加）
+```sql
+CREATE TABLE notification_log (
+  id BIGINT NOT NULL,
+  order_no VARCHAR(32) NOT NULL,
+  type TINYINT NOT NULL COMMENT '0-支付成功 1-订单取消 2-订单超时关闭',
+  channel VARCHAR(20) NOT NULL DEFAULT 'LOG',
+  receiver VARCHAR(100) DEFAULT NULL,
+  content VARCHAR(500) NOT NULL,
+  status TINYINT NOT NULL DEFAULT 0 COMMENT '0-成功 1-失败',
+  retry_count INT NOT NULL DEFAULT 0,
+  error_msg VARCHAR(500) DEFAULT NULL,
+  create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_order (order_no),
+  KEY idx_type_create (type, create_time)
+) COMMENT='通知发送日志';
+```
+
+---
+
+## 9. 接下来要做（**阶段 10：service-search** —— ES 检索增强）
+
+参考 `开发文档.md` §13。核心目标：**搜索型** vs **事务型** 系统分离，把车次/票查询从 MySQL LIKE 升级到 ES。
 
 预期动作：
-1. `service-notification/pom.xml`：minimal 依赖（spring-boot-starter-amqp + web 兜底 actuator + lombok + common），**无需 openfeign / nacos-config / mysql / redis / 雪花**。
-2. `NotificationApplication`（port 9106，worker-id=6，可省雪花）。
-3. **消费者 2 个**（`@RabbitListener` 监听 `orderExchange`）：
-   - `OrderPaidNotificationConsumer` 收 `order.paid` → 模拟发短信/邮件 → 落 `notification_log` 表（本地 MySQL，简化版）。
-   - `OrderCancelNotificationConsumer` 收 `order.cancel` → 模拟通知用户订单已取消。
-4. `RabbitConfig`（声明 `orderExchange` 监听相关队列；不需重声明延迟队列）。
-5. `NotificationLogDO` + `NotificationLogMapper`（最小表：id, orderNo, type 0-支付成功 1-订单取消, content, status 0-成功 1-失败, retry_count, create_time）。
-6. 跑 `mvn -pl service-notification -am clean package -DskipTests` → 8/8 BUILD SUCCESS。
+1. `service-search/pom.xml`：加 `spring-boot-starter-data-elasticsearch` + common + nacos-discovery + web + actuator + lombok。
+2. `SearchApplication`（port 9200，worker-id=7）。
+3. **ES 配置**：`spring.elasticsearch.uris=http://127.0.0.1:9200`。
+4. **索引设计**（Java 注解方式，避免手写 JSON）：
+   - `TrainIndex`（@Document(indexName="train_index")）—— fields: trainNo @Keyword, trainType, startStation @Text+@Keyword, endStation, startTime, endTime, runDate, prices @Nested(BUSINESS/FIRST/SECOND/STAND)。
+   - `TicketIndex`（可选）—— 用于"我的票"快速过滤。
+5. **Controller**：
+   - `GET /trains/search?from=北京&to=上海&date=2026-06-10` → ES `match` + `term` 过滤 → 返回车次+价格。
+   - `GET /trains/{trainNo}/seats?date=...` → 走 Redis Lua GET 批量拿各座位类型剩余。
+6. **同步双写**：service-train-stock 写 DB 时同时 ES save（生产应改 MQ 异步）；service-ticket 同理。
+7. 跑 `mvn -pl service-search -am clean package -DskipTests` → 9/9 BUILD SUCCESS。
 
 > **提示**：
-> - 演示阶段 notification 的下游 channel（短信/邮件）只打 log，**不接真服务**。
-> - DB 仍用 `railway-real`，**notification_log** 表由 SQL 增量新增（`db/init.sql` 末尾 ALTER 或新脚本 `db/notification_log.sql`）。
-> - consumer 失败策略：retry 3 次后进死信，或简单 log 后丢弃。开发文档未明，本期沿用 `service-payment` 的 `simple-retry 3x` + warn-only。
+> - Demo 不启 ES 也能编过（运行时挂掉），本阶段先求 9/9 build green。
+> - **不要动 service-train-stock / service-ticket 的既有写逻辑**（保持稳定），同步双写在 service-search 端通过 MQ 事件（`RK_TRAIN_SYNC`）订阅，**不破坏事务边界**。但本期为最小闭环，可接受 service-train-stock 在 Stage 10 增量加 `@Resource ElasticsearchOperations` 同步 save。
+> - 实际生产应建独立 `service-sync` worker 消费 `train.exchange / train.sync`（MqConstant 已有 `TRAIN_EXCHANGE` / `RK_TRAIN_SYNC` 占位）。
 
 ---
 
@@ -650,6 +705,6 @@ payment.callback ─order.paid─▶ orderExchange ─▶ orderPaidQueue
 ---
 
 **TL;DR**：
-- 现在做完了 common + gateway + service-user + service-train-stock + service-ticket + service-payment + service-order 七块，能编译能打包，**没跑过**。
-- 下一个任务：**阶段 9 service-notification**，按 `开发文档.md` §12 实施，**重点是纯 MQ 消费 + 通知日志表**。
+- 现在做完了 common + gateway + service-user + service-train-stock + service-ticket + service-payment + service-order + service-notification 八块，能编译能打包，**没跑过**。
+- 下一个任务：**阶段 10 service-search**，按 `开发文档.md` §13 实施，**重点是 ES 索引设计 + 同步方案**。
 - 别碰 Nacos 配置中心、别装 MyBatis-Plus、别动 common 的 servlet 拦截器。
