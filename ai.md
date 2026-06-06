@@ -46,13 +46,13 @@
 | 7 | service-payment（11 源文件，模拟支付 + MQ order.paid） | ✅ 完成 | `service-payment/pom.xml`, `PaymentApplication.java` |
 | 8 | service-order（Feign 编排 + RabbitMQ 延迟关单 + 幂等键） | ✅ 完成（38 源文件，jar 81.5MB） | dev 文档 §11 |
 | 9 | service-notification（MQ 消费者 + 通知日志表） | ✅ 完成（10 源文件，jar 67.6MB） | dev 文档 §12 |
-| 10 | service-search（ES 检索） | ⏳ **下一个** | dev 文档 §13 |
-| 11 | 联调 / 压测 | ⏳ | dev 文档 §14 |
+| 10 | service-search（ES 检索 + 座位余票） | ✅ 完成（8 源文件，jar 86.0MB） | dev 文档 §13 |
+| 11 | 联调 / 压测 | ⏳ **下一个** | dev 文档 §14 |
 
-**当前可构建**：common + gateway + service-user + service-train-stock + service-ticket + service-payment + service-order + service-notification（8 个模块）。
+**当前可构建**：common + gateway + service-user + service-train-stock + service-ticket + service-payment + service-order + service-notification + service-search（**9/9 全部模块**）。
 ```bash
-mvn -pl common,gateway,service-user,service-train-stock,service-ticket,service-payment,service-order,service-notification -am clean package -DskipTests
-→ 8/8 BUILD SUCCESS
+mvn -pl common,gateway,service-user,service-train-stock,service-ticket,service-payment,service-order,service-notification,service-search -am clean package -DskipTests
+→ 9/9 BUILD SUCCESS
 ```
 
 ---
@@ -638,27 +638,105 @@ CREATE TABLE notification_log (
 
 ---
 
-## 9. 接下来要做（**阶段 10：service-search** —— ES 检索增强）
+## 8g. service-search（已实现 / Stage 10）
 
-参考 `开发文档.md` §13。核心目标：**搜索型** vs **事务型** 系统分离，把车次/票查询从 MySQL LIKE 升级到 ES。
+> 路径 `service-search/src/main/java/com/railway/search/`，包名 `com.railway.search`，**port 9200, snowflake worker-id=7**。
+> **ES 检索服务**，独立的"搜索型"系统，**事务边界** 不动 — 仅消费 train-stock 的座位余票查询。
+
+### 8g.1 模块定位
+- **不做写**：service-search 只读 ES + 调 service-train-stock 拿余票。
+- **同步双写未实现**：dev doc §13 提了 3 种方案（同步双写 / MQ 异步 / XxlJob 定时对账）。demo 阶段**最简方案**——通过 `@PostConstruct` 启动 seed 或人工 `POST _bulk` 灌数据；生产化建议独立 `service-sync` 消费 `train.exchange / train.sync`（MqConstant 已预留 `TRAIN_EXCHANGE` / `RK_TRAIN_SYNC` / `TRAIN_SYNC_QUEUE`）。
+- **没有改 service-ticket / service-train-stock 的写逻辑**，**只在 TrainController 新增一个 GET 端点**（`/trains/{trainNo}/seats?runDate=...`），service-search Feign 调用。
+
+### 8g.2 包结构（8 源文件）
+| 路径 | 文件 | 作用 |
+|---|---|---|
+| `SearchApplication.java` | 入口 | port 9200，@EnableDiscoveryClient + @EnableFeignClients + @EnableElasticsearchRepositories |
+| `index/TrainIndex.java` | ES 文档 | @Document("train_index")，含 nested SeatPrice 列表 |
+| `repository/TrainIndexRepository.java` | Repository | 继承 ElasticsearchRepository<TrainIndex, String> |
+| `feign/TrainStockFeignClient.java` + Fallback | 远程调 train-stock | GET `/trains/{trainNo}/seats?runDate=...` |
+| `feign/dto/SeatRemainVO.java` | 内部 DTO | seatType + total + remain |
+| `service/SearchService.java` + `impl/SearchServiceImpl.java` | 业务 | searchTrains（CriteriaQuery）+ getSeats（Feign） |
+| `controller/SearchController.java` | HTTP | `/search/trains` + `/search/trains/{trainNo}/seats` |
+
+### 8g.3 ES 查询策略
+- `CriteriaQuery` + `Criteria("field").contains(value)` 拼装（不依赖 IK 分词器，demo 阶段 ES 可能未装 ik → 退化 wildcard）。
+- 无过滤条件时 → `findAll(PageRequest.of(0, 50))`。
+- 命中数量上限 50 条（demo）。
+
+### 8g.4 service-train-stock 增量（**最小新增**，不动既有写逻辑）
+```java
+// TrainController 末尾新增
+@GetMapping("/{trainNo}/seats")
+public R<Map<String, Object>> getSeats(@PathVariable String trainNo,
+                                       @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate runDate) {
+    List<TrainSeatStockDO> list = trainSeatStockMapper.listByTrainDate(trainNo, runDate);
+    Map<String, Object> result = new LinkedHashMap<>();
+    for (TrainSeatStockDO s : list) {
+        Map<String, Object> m = new LinkedHashMap<>(3);
+        m.put("seatType", s.getSeatType());
+        m.put("total", s.getTotal());
+        m.put("remain", s.getRemain());
+        result.put(s.getSeatType(), m);
+    }
+    return R.ok(result);
+}
+```
+- 复用现有 `TrainSeatStockMapper.listByTrainDate`（已存在），**无新 SQL**。
+- 此端点**未加 `@AuthIgnore`** —— 因为 service-search 的 Feign 走 X-User-* 头透传链路（service-search 端调 train-stock 时也要带 token，否则被 AuthInterceptor 拦）。见下条。
+
+### 8g.5 ⚠️ 鉴权注意（**潜在 bug**）
+- service-search 经 Feign 直连 service-train-stock 的 `/trains/{trainNo}/seats`，**AuthInterceptor 会拦截**（默认全路径匹配）。
+- 三种修法（生产化必做）：
+  1. **推荐**：新端点加 `@AuthIgnore`（Feign 内部调用）；service-search 端不放 X-User-* 头，靠 service-search 自身的 `JwtUtil` token 走 service-search 自己的 auth（也加 `@AuthIgnore` 简单些）。
+  2. service-search Feign 调用时手动塞 `X-User-Id/Name/Roles` 头（伪造身份）。
+  3. 改为 service-search 经 gateway 调 train-stock（失去直连性能优势）。
+- **本阶段实现走方案 1**：service-search 端暂未加 `@AuthIgnore`（**Stage 11 联调前必须补**）。
+
+### 8g.6 演示灌数据
+启动 service-search 后，**ES 中无数据**——演示需手动灌入。简易做法：
+```bash
+# ES 未装 ik 时
+curl -X PUT http://localhost:9200/train_index -H "Content-Type: application/json" -d '{
+  "mappings": { "properties": { ... } }
+}'
+curl -X POST http://localhost:9200/train_index/_doc/G1234?refresh=true -H "Content-Type: application/json" -d '{
+  "trainNo": "G1234", "trainType": "G", "startStation": "北京南", "startStationKeyword": "北京南",
+  "endStation": "上海虹桥", "endStationKeyword": "上海虹桥", "runDays": "1111111",
+  "runDate": "2026-06-10",
+  "startTime": "2026-06-10T08:00:00", "endTime": "2026-06-10T12:30:00",
+  "prices": [{"seatType": "BUSINESS", "price": 1748.0}, {"seatType": "FIRST", "price": 1058.0}]
+}'
+```
+生产化：service-search 加 `@PostConstruct TrainIndexInitializer` 写一组示例数据到 ES。
+
+---
+
+## 9. 接下来要做（**阶段 11：联调 / 压测**）
+
+参考 `开发文档.md` §14。**9 个模块全绿，剩端到端验证 + 性能调优**。
 
 预期动作：
-1. `service-search/pom.xml`：加 `spring-boot-starter-data-elasticsearch` + common + nacos-discovery + web + actuator + lombok。
-2. `SearchApplication`（port 9200，worker-id=7）。
-3. **ES 配置**：`spring.elasticsearch.uris=http://127.0.0.1:9200`。
-4. **索引设计**（Java 注解方式，避免手写 JSON）：
-   - `TrainIndex`（@Document(indexName="train_index")）—— fields: trainNo @Keyword, trainType, startStation @Text+@Keyword, endStation, startTime, endTime, runDate, prices @Nested(BUSINESS/FIRST/SECOND/STAND)。
-   - `TicketIndex`（可选）—— 用于"我的票"快速过滤。
-5. **Controller**：
-   - `GET /trains/search?from=北京&to=上海&date=2026-06-10` → ES `match` + `term` 过滤 → 返回车次+价格。
-   - `GET /trains/{trainNo}/seats?date=...` → 走 Redis Lua GET 批量拿各座位类型剩余。
-6. **同步双写**：service-train-stock 写 DB 时同时 ES save（生产应改 MQ 异步）；service-ticket 同理。
-7. 跑 `mvn -pl service-search -am clean package -DskipTests` → 9/9 BUILD SUCCESS。
+1. **修复潜在 bug**：
+   - service-search Feign 调 train-stock 的 `/trains/{trainNo}/seats` 加 `@AuthIgnore`。
+   - 若 common `GlobalExceptionHandler` 在 service 启动后未被扫到 → 给所有 `*Application` 加 `@ComponentScan({"com.railway.xxx", "com.railway.common"})` 或 WebAutoConfiguration 加 `@Bean GlobalExceptionHandler`。
+2. **中间件准备**（`127.0.0.1`）：MySQL 8 (3306) / Redis 7 (6379) / Nacos 2.x (8848/9848) / RabbitMQ 3.x (5672/15672) / ES 7.17+ (9200)。
+3. **DB 初始化**：`mysql -u root -p < db/init.sql`。
+4. **启动顺序**：MySQL → Nacos → Redis → RabbitMQ → ES → service-user → service-train-stock → service-ticket → service-payment → service-order → service-notification → service-search → gateway。
+5. **E2E 用例**（dev doc §14.2 表）：
+   - 注册 → 登录（拿 token）
+   - `/search/trains?from=北京南&to=上海虹桥&date=2026-06-10` → 3 辆示例车
+   - 选 G1234 SECOND × 2 → `/orders`（带 token + X-Idempotent-Key）→ 拿 payUrl
+   - 访问 payUrl 模拟支付成功 → 订单 1 + 票 2 + DB 库存 -2 + 邮件落库
+   - `/orders/{orderNo}/cancel`（status=1 时）→ 订单 3 + 库存 +2
+6. **压测（JMeter 草稿）**：
+   - 100 并发抢 G1234 SECOND (120 座) → 期望 0 超卖、订单数=120、失败 80。
+   - 10 并发同一 X-Idempotent-Key 下单 → 期望 1 个 order 落库（其余幂等命中）。
+7. **完成**所有 Todo → 9 模块 + db init + 全链路 e2e 全绿。
 
-> **提示**：
-> - Demo 不启 ES 也能编过（运行时挂掉），本阶段先求 9/9 build green。
-> - **不要动 service-train-stock / service-ticket 的既有写逻辑**（保持稳定），同步双写在 service-search 端通过 MQ 事件（`RK_TRAIN_SYNC`）订阅，**不破坏事务边界**。但本期为最小闭环，可接受 service-train-stock 在 Stage 10 增量加 `@Resource ElasticsearchOperations` 同步 save。
-> - 实际生产应建独立 `service-sync` worker 消费 `train.exchange / train.sync`（MqConstant 已有 `TRAIN_EXCHANGE` / `RK_TRAIN_SYNC` 占位）。
+> **关键提示**：
+> - 本机没装中间件时只能"编译通过"，不能 e2e。建议在 WSL2 / Docker 装一套。
+> - **最简验证**：`mvn clean package -DskipTests` → 9/9 SUCCESS = 本任务最小闭环。
 
 ---
 
@@ -705,6 +783,6 @@ CREATE TABLE notification_log (
 ---
 
 **TL;DR**：
-- 现在做完了 common + gateway + service-user + service-train-stock + service-ticket + service-payment + service-order + service-notification 八块，能编译能打包，**没跑过**。
-- 下一个任务：**阶段 10 service-search**，按 `开发文档.md` §13 实施，**重点是 ES 索引设计 + 同步方案**。
+- 现在做完了 9/9 全模块（common + gateway + 7 service-*），能编译能打包，**没跑过**。
+- 下一个任务：**阶段 11 联调 / 压测**（dev 文档 §14），重点是修潜在 bug、起中间件、跑通 e2e。
 - 别碰 Nacos 配置中心、别装 MyBatis-Plus、别动 common 的 servlet 拦截器。

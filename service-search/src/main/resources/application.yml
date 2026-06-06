@@ -1,0 +1,41 @@
+server:
+  port: 9200
+
+spring:
+  application:
+    name: service-search
+  cloud:
+    nacos:
+      discovery:
+        server-addr: 127.0.0.1:8848
+      config:
+        enabled: false
+  elasticsearch:
+    uris: http://127.0.0.1:9200
+    connection-timeout: 2s
+    socket-timeout: 5s
+
+# Feign：调 service-train-stock 拿座位余票
+feign:
+  client:
+    config:
+      default:
+        connect-timeout: 3000
+        read-timeout: 5000
+
+snowflake:
+  worker-id: 7
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when_authorized
+
+logging:
+  level:
+    com.railway: debug
+    org.springframework.data.elasticsearch.client: info
