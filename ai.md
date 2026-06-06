@@ -44,15 +44,15 @@
 | 5 | service-train-stock（23 源文件，Redis+Lua 原子预占） | ✅ 完成 | `service-train-stock/pom.xml`, `TrainStockApplication.java` |
 | 6 | service-ticket（13 源文件，票号 + 状态机） | ✅ 完成 | `service-ticket/pom.xml`, `TicketApplication.java` |
 | 7 | service-payment（11 源文件，模拟支付 + MQ order.paid） | ✅ 完成 | `service-payment/pom.xml`, `PaymentApplication.java` |
-| 8 | service-order（Feign 编排 + RabbitMQ 延迟） | ⏳ **下一个** | dev 文档 §11 |
-| 9 | service-notification（MQ 消费者） | ⏳ | dev 文档 §12 |
+| 8 | service-order（Feign 编排 + RabbitMQ 延迟关单 + 幂等键） | ✅ 完成（38 源文件，jar 81.5MB） | dev 文档 §11 |
+| 9 | service-notification（MQ 消费者） | ⏳ **下一个** | dev 文档 §12 |
 | 10 | service-search（ES 检索） | ⏳ | dev 文档 §13 |
 | 11 | 联调 / 压测 | ⏳ | dev 文档 §14 |
 
-**当前可构建**：common + gateway + service-user + service-train-stock + service-ticket + service-payment（6 个模块）。
+**当前可构建**：common + gateway + service-user + service-train-stock + service-ticket + service-payment + service-order（7 个模块）。
 ```bash
-mvn -pl common,gateway,service-user,service-train-stock,service-ticket,service-payment -am clean package -DskipTests
-→ 6/6 BUILD SUCCESS
+mvn -pl common,gateway,service-user,service-train-stock,service-ticket,service-payment,service-order -am clean package -DskipTests
+→ 7/7 BUILD SUCCESS
 ```
 
 ---
@@ -517,47 +517,93 @@ java -jar service-user/target/service-user-1.0.0-SNAPSHOT.jar
 
 ---
 
-## 9. 接下来要做（**阶段 8：service-order** —— 核心编排）
+## 8e. service-order（已实现 / Stage 8）
 
-参考 `开发文档.md` §11（line 718~），核心动作：
+> 路径 `service-order/src/main/java/com/railway/order/`，包名 `com.railway.order`，**port 9105, snowflake worker-id=5**。
 
-1. `service-order/pom.xml`：copy `service-ticket` 的依赖 + 加 `spring-cloud-starter-openfeign`（调 stock/ticket/payment）+ `spring-boot-starter-amqp`（收 `order.paid` / 发 `order.delay` 延迟关单）。
-2. 实体 `OrderDO`（表 `orders`，9 字段：id / orderNo / userId / trainNo / runDate / seatType / num / amount DECIMAL(10,2) / status 0-待支付 1-已支付 2-已取消 3-已退款 4-已完成 / expireTime DATETIME）。
-3. `OrderMapper` + `OrderMapper.xml`：含 `confirmByOrderNo`（0→1）/ `cancelByOrderNo`（0→3）/ `refundByOrderNo`（1→3）/ `completeByOrderNo`（1→4）。
-4. **Feign 客户端 4 个**（放 `feign/`，**不带** `@EnableFeignClients` 因为这个是子模块自己的）—— 注：`@EnableFeignClients` 写在 `OrderApplication` 上，basePackages 指向 `com.railway.order.feign`：
-   - `StockFeignClient` → `service-train-stock`
-   - `TicketFeignClient` → `service-ticket`
-   - `PaymentFeignClient` → `service-payment`
-   - `UserFeignClient` → `service-user`（拿乘客信息）
-5. DTO：
-   - `CreateOrderDTO`（trainNo, runDate, seatType, passengerIds: List<Long>, idempotentKey）
-   - `CancelOrderDTO`（orderNo, reason）
-6. VO：`OrderVO`、`OrderDetailVO`（含票列表）。
-7. **MQ Consumer**：
-   - `OrderPaidConsumer` 收 `order.paid` → 改 order status=1 → 调 stock.confirm + ticket.confirm。
-   - `OrderDelayCancelConsumer` 收 `order.cancel`（来自 TTL 队列的 DLX）→ 改 order status=3（仅当 0 时）→ 调 stock.release + ticket.cancel。
-8. **MQ 声明**（service-order 端）：
-   - `orderExchange` (Topic) + `orderPaidQueue` 绑 RK `order.paid`（**消费侧重声明**）
-   - `orderDelayExchange` (Direct) + `orderDelayQueue` 绑 RK `order.delay`，**TTL=15min, DLX=orderExchange, DLRK=order.cancel**
-   - `orderCancelQueue` 绑 RK `order.cancel`（消费 `orderDelayQueue` 死信）
-9. `IdempotentAspect`（**common 没实现**，先在 service-order 写）—— 用 `X-Idempotent-Key` + Redis SETNX。
-10. `OrderService`：
-    - `create(CreateOrderDTO)` —— 校验 → 幂等 → 雪花 orderNo → **Feign stock.occupy**（失败抛）→ 写 order status=0 + expireTime=now+15min → **发 MQ order.delay**（带 orderNo）→ Feign ticket.issue → Feign payment.createPay → 返回 OrderDetailVO（含 payUrl）。
-    - `cancel(orderNo, userId)` —— 校验归属 → 改 order status=0→3 → Feign stock.release → Feign ticket.cancel。
-    - `getByOrderNo(orderNo, userId)` —— 查 order + 票。
-11. `OrderController`：
-    - `POST /orders`（需登录 + X-Idempotent-Key）
-    - `GET /orders/{orderNo}`
-    - `POST /orders/{orderNo}/cancel`
-12. `application.yml`：port 9105，worker-id=5，rabbitmq + feign 配置（`feign.client.config.default.connect-timeout: 3000`）。
-13. 跑 `mvn -pl service-order -am clean package -DskipTests`。
+### 8e.1 实体 + Mapper（状态机 SQL）
+- `OrderDO`：表 `orders`（9 字段：id / orderNo "O"+雪花 / userId / trainNo / runDate / seatType / num / amount DECIMAL(10,2) / status / expireTime / createTime / updateTime）。
+- `OrderMapper.xml` 状态机 SQL 模板：`UPDATE orders SET status=?, update_time=NOW() WHERE order_no=? AND status IN (...)`：
+  - `confirmByOrderNo` 0→1
+  - `cancelByOrderNo` 0→2
+  - `refundByOrderNo` 0/1→3（关单 / 自动关单）
+  - `completeByOrderNo` 1→4
+- 全部幂等：affected=0 = 状态不对或已处理，**不抛异常**（消费者场景）。
 
-> **重要提示**：
-> - `@EnableFeignClients(basePackages = "com.railway.order.feign")` 写在 `OrderApplication`。
-> - Feign 调用直连业务端口，**不走 gateway**：调 `localhost:9102` / `9103` / `9104`。
-> - **idempotent 切面** 在 common 没实现，本阶段先在 service-order 自己写。生产应抽到 common。
-> - 延迟关单：`convertAndSend(order.delay.exchange, order.delay, orderNo, msg -> { msg.getMessageProperties().setExpiration("900000"); return msg; })` —— RabbitMQ 会按消息 TTL 把消息从 `orderDelayQueue`（无消费者）转发到 DLX（`orderExchange`）+ DLRK (`order.cancel`)，由 `orderCancelQueue` 消费。
-> - `OrderPaidConsumer` 调 `stock.confirm` 是关键 —— 否则 Redis 扣了 DB 没扣，最终数据不一致。
+### 8e.2 Feign 编排（4 客户端 + 4 Fallback）
+- 路径 `feign/`：`StockFeignClient` (occupy/confirm/release) / `TicketFeignClient` (issue/confirm/cancel) / `PaymentFeignClient` (createPay) / `UserFeignClient` (listByIds 拿乘客信息)。
+- 每个 `*FeignClientFallback` 返 `R.fail(SERVER_ERROR, "服务暂不可用")`。
+- 所有 Feign DTO（`OccupyStockDTO` / `ConfirmStockDTO` / `ReleaseStockDTO` / `IssueTicketDTO` / `PassengerVO` / `PayVO` / `TicketVO` ...）在 `feign/dto/`，**不复用内部 VO/DO**，仅按 JSON 契约对得齐。
+- Manager 层（`OrderStockManager` / `OrderTicketManager` / `OrderPayManager` / `OrderUserManager`）翻译 `R` → `BizException`（STOCK_NOT_ENOUGH / TICKET_ISSUE_FAILED / PAY_FAILED）。
+
+### 8e.3 RabbitMQ 拓扑（**延迟关单核心**）
+```
+send ─▶ orderDelayExchange(Direct) ─order.delay─▶ orderDelayQueue
+                                                      │ TTL=15min
+                                                      │ (无消费者)
+                                                      ▼ DLX
+                                              orderExchange(Topic) ─order.cancel─▶ orderCancelQueue
+                                                                                            │
+                                                                                            ▼
+                                                                       OrderDelayCancelConsumer
+payment.callback ─order.paid─▶ orderExchange ─▶ orderPaidQueue
+                                                    │
+                                                    ▼
+                                         OrderPaidConsumer
+```
+- 关键实现 `RabbitConfig`：
+  - `orderDelayQueue`：`x-message-ttl=900_000` + `x-dead-letter-exchange=orderExchange` + `x-dead-letter-routing-key=order.cancel`。
+  - 发延迟消息 `convertAndSend(orderDelayExchange, RK_ORDER_DELAY, {orderNo}, m -> { m.getMessageProperties().setExpiration("900000"); return m; })`。
+- **消费者**：
+  - `OrderPaidConsumer`：`affected=0` 跳过（幂等）；成功后调 `stock.confirm` + `ticket.confirm`（warn-only 失败，不回滚订单状态）。
+  - `OrderDelayCancelConsumer`：仅当 `status=0` 时执行；状态机 0→3（refundByOrderNo）+ `stock.release` + `ticket.cancel`。
+
+### 8e.4 幂等切面（**local 暂存 service-order**）
+- `aspect/Idempotent` + `aspect/IdempotentAspect`：读 `X-Idempotent-Key` 头 → Lua `idempotent_set.lua` SETNX → 失败抛 `IDEMPOTENT_REPEAT`。
+- `key` 命名：`IDEMPOTENT:{key}`（来自 `RedisKeyConstant.IDEMPOTENT`），TTL 默认 60s。
+- **生产化建议**：抽到 common，与 `RequireRoleAspect` 一起。common 已有 `idempotent_set.lua` 脚本可直接复用。
+
+### 8e.5 OrderService.create 主流程（**带补偿**）
+```
+1. 校验 num ≤ 5 + userId
+2. 雪花生 orderNo
+3. userManager.listByIds(passengerIds)            // 容错：拿不到给 defaultPassenger
+4. stockManager.occupy(...)                        // 失败 → STOCK_NOT_ENOUGH
+5. insertOrder(status=0, expireTime=now+15min)     // 失败 → catch safeRelease
+6. sendDelayMessage(orderNo)                       // warn-only 失败
+7. ticketManager.issue(...)                        // 失败 → safeRelease + 改 status=3 + TICKET_ISSUE_FAILED
+8. payManager.createPay(...)                       // warn-only 失败：保留 order，前端可重试
+9. 返回 {orderNo, payUrl, amount, expireTime}
+```
+
+### 8e.6 Controller（4 endpoint）
+| 方法 | 路径 | 鉴权 | 幂等 | 备注 |
+|---|---|---|---|---|
+| POST | `/orders` | JWT | `@Idempotent(60s)` | 客户端必传 `X-Idempotent-Key` |
+| POST | `/orders/{orderNo}/cancel` | JWT | — | 仅 owner + status=0 |
+| GET | `/orders/{orderNo}` | JWT | — | 返回 detail（order + 票列表，本期票列表留空） |
+| GET | `/orders` | JWT | — | 当前用户订单分页（PageHelper） |
+
+---
+
+## 9. 接下来要做（**阶段 9：service-notification**）
+
+参考 `开发文档.md` §12。核心目标：**纯 MQ 消费者**，无 HTTP Controller。
+
+预期动作：
+1. `service-notification/pom.xml`：minimal 依赖（spring-boot-starter-amqp + web 兜底 actuator + lombok + common），**无需 openfeign / nacos-config / mysql / redis / 雪花**。
+2. `NotificationApplication`（port 9106，worker-id=6，可省雪花）。
+3. **消费者 2 个**（`@RabbitListener` 监听 `orderExchange`）：
+   - `OrderPaidNotificationConsumer` 收 `order.paid` → 模拟发短信/邮件 → 落 `notification_log` 表（本地 MySQL，简化版）。
+   - `OrderCancelNotificationConsumer` 收 `order.cancel` → 模拟通知用户订单已取消。
+4. `RabbitConfig`（声明 `orderExchange` 监听相关队列；不需重声明延迟队列）。
+5. `NotificationLogDO` + `NotificationLogMapper`（最小表：id, orderNo, type 0-支付成功 1-订单取消, content, status 0-成功 1-失败, retry_count, create_time）。
+6. 跑 `mvn -pl service-notification -am clean package -DskipTests` → 8/8 BUILD SUCCESS。
+
+> **提示**：
+> - 演示阶段 notification 的下游 channel（短信/邮件）只打 log，**不接真服务**。
+> - DB 仍用 `railway-real`，**notification_log** 表由 SQL 增量新增（`db/init.sql` 末尾 ALTER 或新脚本 `db/notification_log.sql`）。
+> - consumer 失败策略：retry 3 次后进死信，或简单 log 后丢弃。开发文档未明，本期沿用 `service-payment` 的 `simple-retry 3x` + warn-only。
 
 ---
 
@@ -604,6 +650,6 @@ java -jar service-user/target/service-user-1.0.0-SNAPSHOT.jar
 ---
 
 **TL;DR**：
-- 现在做完了 common + gateway + service-user + service-train-stock + service-ticket + service-payment 六块，能编译能打包，**没跑过**。
-- 下一个任务：**阶段 8 service-order**（**核心**），按 `开发文档.md` §11 实施，**重点是 Feign 编排 + RabbitMQ 延迟关单 + 幂等键**。
+- 现在做完了 common + gateway + service-user + service-train-stock + service-ticket + service-payment + service-order 七块，能编译能打包，**没跑过**。
+- 下一个任务：**阶段 9 service-notification**，按 `开发文档.md` §12 实施，**重点是纯 MQ 消费 + 通知日志表**。
 - 别碰 Nacos 配置中心、别装 MyBatis-Plus、别动 common 的 servlet 拦截器。
