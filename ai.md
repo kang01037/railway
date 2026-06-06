@@ -41,18 +41,19 @@
 | 2 | common（25 源文件 + 3 Lua + 11 单测） | ✅ 完成 | `common/pom.xml` |
 | 3 | service-user（17 源文件） | ✅ 完成 | `service-user/pom.xml`, `UserApplication.java` |
 | 4 | gateway（5 源文件，webflux 鉴权 + TraceId） | ✅ 完成 | `gateway/pom.xml`, `GatewayApplication.java` |
-| 5 | service-train-stock（车次 + 库存 + Redis+Lua） | ⏳ **下一个** | dev 文档 §8 |
-| 6 | service-ticket | ⏳ | dev 文档 §9 |
+| 5 | service-train-stock（23 源文件，Redis+Lua 原子预占） | ✅ 完成 | `service-train-stock/pom.xml`, `TrainStockApplication.java` |
+| 6 | service-ticket | ⏳ **下一个** | dev 文档 §9 |
 | 7 | service-payment | ⏳ | dev 文档 §10 |
 | 8 | service-order（Feign 编排 + RabbitMQ 延迟） | ⏳ | dev 文档 §11 |
 | 9 | service-notification（MQ 消费者） | ⏳ | dev 文档 §12 |
 | 10 | service-search（ES 检索） | ⏳ | dev 文档 §13 |
 | 11 | 联调 / 压测 | ⏳ | dev 文档 §14 |
 
-**当前可构建**：common + gateway + service-user。
+**当前可构建**：common + gateway + service-user + service-train-stock（4 个模块）。
 ```bash
-mvn -pl gateway -am clean package -DskipTests   # 82 MB fat jar
-mvn -pl service-user -am clean package -DskipTests   # 79 MB fat jar
+mvn -pl service-train-stock -am clean package -DskipTests   # 69.6 MB fat jar
+mvn -pl gateway           -am clean package -DskipTests    # 82.7 MB fat jar
+mvn -pl service-user      -am clean package -DskipTests    # 79.3 MB fat jar
 ```
 
 ---
@@ -215,6 +216,55 @@ Long ok = stringRedisTemplate.execute(script, List.of("STOCK:" + trainNo + ":" +
 
 ---
 
+## 6b. service-train-stock 模块
+
+> 路径：`service-train-stock/src/main/java/com/railway/trainstock/`
+> 端口 9102，MySQL `railway-real`，Redis + Lua 原子预占。
+
+### 6b.1 实体 / Mapper
+
+| Entity | 表 | Mapper 关键方法 |
+|---|---|---|
+| `TrainDO` | `train` | `TrainMapper`（`listByCondition(start,end,status)`, `countRunningOnDate(trainNo,runDate)` 用 `WEEKDAY()` 切 run_days） |
+| `TrainSeatStockDO` | `train_seat_stock` | `TrainSeatStockMapper`（`decreaseRemainByVersion` 乐观锁、`increaseRemainByVersion` 乐观锁、`listByTrainDate`） |
+| `StockFlowDO` | `stock_flow` | `StockFlowMapper`（`listByOrderNo`） |
+
+### 6b.2 Controller 路径
+
+| 类 | 路径 | 鉴权 |
+|---|---|---|
+| `TrainController` | `/trains`, `/trains/{id}` | POST/PUT/DELETE `@RequireRole("ADMIN")`；GET 任意 |
+| `StockController` | `/stock/occupy`, `/stock/confirm`, `/stock/release` | **全部 `@AuthIgnore`**（Feign 内部调用） |
+| `SeatController` | `/trains/{trainNo}/seats?runDate=yyyy-MM-dd` | 任意 |
+
+### 6b.3 服务 / Manager
+
+| 类 | 职责 |
+|---|---|
+| `manager/StockManager` | **封装 Redis + Lua**：key 拼装、`ensureStockKey` 懒加载、`occupy` / `release` 调 Lua 脚本。业务层不直接碰 `StringRedisTemplate` 和 Lua。 |
+| `service/TrainService` | 车次 CRUD + 座位库存查询；新增时同一事务内插 `train` + 多行 `train_seat_stock` |
+| `service/StockService` | occupy / confirm / release 三件事：Redis 原子 → 写 stock_flow → DB 乐观锁扣/回 |
+
+### 6b.4 库存原子性流程（详见 §7.9）
+
+```
+occupy:
+  1. 懒加载 Redis key (SETNX + 1d TTL)
+  2. Lua occupy_stock: 1 成功 / 0 库存不足 / -1 key 不存在
+  3. 写 stock_flow (bizType=1, delta=-num)
+  4. DB decreaseRemainByVersion (version 一致 & remain >= num)
+     失败 → 回滚 Redis + 抛 STOCK_VERSION_CONFLICT
+release:
+  1. 懒加载 Redis key
+  2. Lua release_stock (幂等: key 不存在视为成功)
+  3. 写 stock_flow (bizType=3, delta=+num)
+  4. DB increaseRemainByVersion
+confirm:
+  1. 写 stock_flow (bizType=2, delta=-num)，不再扣
+```
+
+---
+
 ## 7. 关键约定（**违反会被打回**）
 
 ### 7.1 MyBatis（**不要用 MyBatis-Plus**）
@@ -225,6 +275,17 @@ Long ok = stringRedisTemplate.execute(script, List.of("STOCK:" + trainNo + ":" +
 - 动态 SQL 用 `<set>` / `<if>` / `<foreach>`，不在 Java 里拼字符串。
 - 复杂查询分页：先 `PageHelper.startPage(pageNum, pageSize)`，再调用 mapper，**返回的 List 已被包装**，包 `new PageInfo<>(list)`。
 - 通用 CRUD **不抽 BaseMapper**（dev 文档 §4.2 原则"复制即可，避免抽象过度"）。
+- **乐观锁** 模板（service-train-stock 已实现，参考 TrainSeatStockMapper.xml）：
+  ```xml
+  <update id="decreaseRemainByVersion">
+      UPDATE train_seat_stock
+      SET remain = remain - #{num}, version = version + 1
+      WHERE train_no = #{trainNo} AND run_date = #{runDate} AND seat_type = #{seatType}
+        AND version = #{version} AND remain &gt;= #{num}
+  </update>
+  ```
+  Service 层先 `selectByKey` 拿 `version` 再 update，**返回 0 行**即冲突 → 抛 `STOCK_VERSION_CONFLICT`。
+  Redis 侧的"原子性"由 Lua 提供；DB 侧的"原子性"由 `version` 乐观锁提供。**二者缺一不可**。
 
 ### 7.2 Lombok
 
@@ -236,6 +297,7 @@ Long ok = stringRedisTemplate.execute(script, List.of("STOCK:" + trainNo + ":" +
 - **永远不要在业务代码里 new LoginUser / set UserContext**。统一由 `AuthInterceptor` 处理。
 - `UserContext.currentUserId()` 拿不到返回 `null`（**不抛**）；`mustCurrentUserId()` 拿不到抛 `UNAUTHORIZED`。
 - 请求结束 `UserContext.clear()` 已被 `afterCompletion` 调用，**不要手动 clear**。
+- **服务间内部接口**（如 `service-order` 调 `service-train-stock` 的 `/stock/occupy`）：**加 `@AuthIgnore`**。因为是 Feign 直连不经过 gateway 鉴权链，AuthInterceptor 也读不到 X-User-* 头，反而会因为没 token 抛 401。
 
 ### 7.4 JWT
 
@@ -245,7 +307,19 @@ Long ok = stringRedisTemplate.execute(script, List.of("STOCK:" + trainNo + ":" +
 ### 7.5 雪花 ID
 
 - `SnowflakeIdWorker` 1+41+10+12 布局（epoch 2023-11-14）。
-- **每个进程/服务用不同 worker-id**（0~1023），生产用 Nacos 注入；demo 阶段在 yml 写死（gateway=0, user=1, train-stock=2, ...）。
+- **每个进程/服务用不同 worker-id**（0~1023），生产用 Nacos 注入；demo 阶段在 yml 写死：
+
+| 服务 | worker-id |
+|---|---|
+| gateway | 0 |
+| service-user | 1 |
+| service-train-stock | 2 |
+| service-ticket | 3 |
+| service-payment | 4 |
+| service-order | 5 |
+| service-notification | 6 |
+| service-search | 7 |
+
 - 时钟回拨抛 `SERVER_ERROR`（BizException）。
 
 ### 7.6 异常 / R
@@ -268,6 +342,7 @@ Long ok = stringRedisTemplate.execute(script, List.of("STOCK:" + trainNo + ":" +
 | service-search | 9200 | `service-search`（非常规，ES 单独端口） |
 
 外部访问路径永远是 `http://localhost:9000/api/<svc>/<path>`，**不直连业务服务**。
+（服务间 Feign 调用直连业务端口，**不走 gateway**，加 `@AuthIgnore`。）
 
 ### 7.8 包名映射（artifactId → 包前缀）
 
@@ -281,15 +356,32 @@ service-notification → com.railway.notification
 service-search       → com.railway.search
 ```
 
-### 7.9 不要做的事
+### 7.9 库存原子性模板（**核心，service-order 也要按此调**）
+
+**Redis Key**：`STOCK:{trainNo}:{runDate}:{seatType}`，TTL 1 天，懒加载。
+**Lua**：`occupy_stock.lua` 返回 1/0/-1，**调用方**：
+```
+ensureStockKey(...)     // 懒加载（DB → Redis SETNX）
+luaResult = occupy(...)  // -1 报错 STOCK_NOT_FOUND
+                          //  0 报错 STOCK_NOT_ENOUGH
+                          //  1 继续
+saveFlow(bizType=1, delta=-num)
+decreaseRemainByVersion(...)  // DB 乐观锁
+// 失败：回滚 Redis + 抛 STOCK_VERSION_CONFLICT
+```
+**`release`**：Lua INCRBY（幂等：key 不存在视为成功）+ saveFlow(bizType=3, delta=+num) + increaseRemainByVersion。
+**`confirm`**：仅 saveFlow(bizType=2, delta=-num)，Redis/DB 已在 occupy 阶段扣减，不重复操作。
+
+### 7.10 不要做的事
 
 - ❌ 引入 MyBatis-Plus。
 - ❌ 引入 Sentinel / Sleuth / Swagger 聚合（dev 文档明确不要）。
 - ❌ 引入 docker-compose / k8s 部署目录。
-- ❌ 写 `manager/` 层（dev 文档 §4 标注"服务简单可省"）。
 - ❌ 把 Feign 接口放 `api-*` 模块（统一放调用方 `feign/` 包）。
 - ❌ 用 `@Value` 注入 jwt/snowflake，**统一**用 `@ConfigurationProperties` 绑定。
 - ❌ 在 common 里写 webmvc 拦截器并期望 gateway 加载——webflux 不兼容。
+- ❌ 在 service-order 等服务里**直接**调 mapper 写 stock_flow——统一经 StockService。
+- ❌ 删 train 时**级联删库存**：演示阶段 deleteTrain 只打日志（生产应加事务删 stock + train）。
 
 ---
 
@@ -313,22 +405,29 @@ java -jar service-user/target/service-user-1.0.0-SNAPSHOT.jar
 
 ---
 
-## 9. 接下来要做（**阶段 5：service-train-stock**）
+## 9. 接下来要做（**阶段 6：service-ticket**）
 
-参考 `开发文档.md` §8（line 502~），核心动作：
+参考 `开发文档.md` §9（line 644~），核心动作：
 
-1. `service-train-stock/pom.xml`：copy `service-user` 的依赖 + 去掉 openfeign（暂不需要）+ 加 `mysql-connector-j`（其实 service-user 隐式带了）。
-2. 实体 `TrainDO` / `TrainSeatStockDO` / `StockFlowDO`。
-3. Mapper 三个 + XML。
-4. `service/TrainService` + `impl/TrainServiceServiceImpl`（CRUD，车次查询带 `queryTrains(start,end,date)`）。
-5. `service/StockService` + `impl/StockServiceImpl`：封装 `occupyStock(trainNo, date, seatType, count)` / `confirmStock(orderNo)` / `releaseStock(orderNo)` 三个方法，**核心是调 Lua + 写 stock_flow**。
-6. `manager/StockManager.java`（**按 dev 文档要求保留**，封装 Redis Lua 调用）。
-7. `controller/TrainController`（CRUD，admin `@RequireRole("ADMIN")`）+ `StockController`（占/确认/释放，**全部 `@AuthIgnore` 内部接口，仅 service-order 通过 Feign 调**）。
-8. `application.yml`：port 9102，worker-id=2。
-9. 写一张 `SeatController`（`GET /trains/{no}/seats`）。
-10. 跑 `mvn -pl service-train-stock -am clean package -DskipTests`。
+1. `service-ticket/pom.xml`：copy `service-train-stock` 的依赖（不需要 openfeign）。
+2. 实体 `TicketDO`（表 `ticket`，10 个业务字段含 `ticket_no` / `order_no` / `passenger_id` / `id_card_no` 冗余 / `price` DECIMAL(10,2) / `status` 0-待支付 1-已出票 2-已改签 3-已退）。
+3. `TicketMapper` + `TicketMapper.xml`（按 orderNo 查、按 id 改 status）。
+4. DTO：`IssueTicketDTO`（含 `passengerId` / `passengerName` / `idCardNo` / `seatType` / `price` 冗余字段，**Feign 入参用**）。
+5. VO：`TicketVO`、`TicketListVO`。
+6. `TicketService`：
+   - `issue(orderNo, trainNo, runDate, seatType, passengerList, price)` —— 按 `num = passengerList.size()` 循环生成 N 张票，状态 0-待支付。
+   - `confirmByOrderNo(orderNo)` —— 支付成功后改 status=1。
+   - `cancelByOrderNo(orderNo)` —— 改 status=3。
+   - `listByOrderNo(orderNo)` —— 给前端展示。
+7. `TicketController`：
+   - `POST /tickets/issue` `@AuthIgnore`（service-order 调）
+   - `POST /tickets/{orderNo}/confirm` `@AuthIgnore`
+   - `POST /tickets/{orderNo}/cancel` `@AuthIgnore`
+   - `GET /tickets/order/{orderNo}` 需登录
+8. `application.yml`：port 9103，worker-id=3。
+9. 跑 `mvn -pl service-ticket -am clean package -DskipTests`。
 
-> **重要**：StockController 的 `/stock/**` 是服务间调用，**不经过 gateway**（`@AuthIgnore` + 内部 IP 白名单），demo 阶段省白名单只加 `@AuthIgnore`。
+> **注意**：ticket 状态机是**幂等**的——confirm 多次调用 = 保持 status=1；cancel 多次调用 = 保持 status=3。Service 内部用 UPDATE WHERE status=0/1 加乐观条件。
 
 ---
 
@@ -343,13 +442,16 @@ java -jar service-user/target/service-user-1.0.0-SNAPSHOT.jar
 | 阶段 2 common 完整代码 | `开发文档.md` line 175-435 |
 | 阶段 3 user 完整代码 | `开发文档.md` line 437-... |
 | 阶段 4 gateway | `开发文档.md` line 438-500 |
-| 阶段 5 train-stock | `开发文档.md` line 502-... |
+| 阶段 5 train-stock | `开发文档.md` line 502-641 |
+| 阶段 6 ticket | `开发文档.md` line 644-... |
 | 阶段 8 order 编排 | `开发文档.md` line ~680-... |
 | 雪花算法布局 | `开发文档.md` line ~244 + `common/src/main/java/.../SnowflakeIdWorker.java` |
 | Lua 脚本全文 | `common/src/main/resources/lua/*.lua` |
 | JWT 解析实现 | `common/src/main/java/com/railway/common/util/JwtUtil.java` |
 | 鉴权拦截器实现 | `common/src/main/java/com/railway/common/interceptor/AuthInterceptor.java` |
 | 网关鉴权 filter | `gateway/src/main/java/com/railway/gateway/filter/AuthGlobalFilter.java` |
+| 库存原子性流程 | `service-train-stock/src/main/java/.../service/impl/StockServiceImpl.java` |
+| StockManager 封装 | `service-train-stock/src/main/java/.../manager/StockManager.java` |
 
 ---
 
@@ -366,6 +468,6 @@ java -jar service-user/target/service-user-1.0.0-SNAPSHOT.jar
 ---
 
 **TL;DR**：
-- 现在做完了 common + gateway + service-user 三块，能编译能打包，**没跑过**。
-- 下一个任务：阶段 5 service-train-stock，按 `开发文档.md` §8 实施，**重点是 Redis+Lua 原子预占**。
+- 现在做完了 common + gateway + service-user + service-train-stock 四块，能编译能打包，**没跑过**。
+- 下一个任务：阶段 6 service-ticket，按 `开发文档.md` §9 实施，**重点是状态机幂等**。
 - 别碰 Nacos 配置中心、别装 MyBatis-Plus、别动 common 的 servlet 拦截器。

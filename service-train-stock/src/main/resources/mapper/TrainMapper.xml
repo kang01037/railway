@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.railway.trainstock.mapper.TrainMapper">
+
+    <resultMap id="BaseResultMap" type="com.railway.trainstock.entity.TrainDO">
+        <id     column="id"             property="id"/>
+        <result column="train_no"       property="trainNo"/>
+        <result column="train_type"     property="trainType"/>
+        <result column="start_station"  property="startStation"/>
+        <result column="end_station"    property="endStation"/>
+        <result column="start_time"     property="startTime"/>
+        <result column="end_time"       property="endTime"/>
+        <result column="run_days"       property="runDays"/>
+        <result column="status"         property="status"/>
+        <result column="create_time"    property="createTime"/>
+        <result column="update_time"    property="updateTime"/>
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        id, train_no, train_type, start_station, end_station,
+        start_time, end_time, run_days, status, create_time, update_time
+    </sql>
+
+    <insert id="insert" parameterType="com.railway.trainstock.entity.TrainDO">
+        INSERT INTO train (
+            id, train_no, train_type, start_station, end_station,
+            start_time, end_time, run_days, status, create_time, update_time
+        ) VALUES (
+            #{id}, #{trainNo}, #{trainType}, #{startStation}, #{endStation},
+            #{startTime}, #{endTime}, #{runDays}, #{status}, #{createTime}, #{updateTime}
+        )
+    </insert>
+
+    <select id="selectById" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/> FROM train WHERE id = #{id}
+    </select>
+
+    <select id="selectByTrainNo" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/> FROM train WHERE train_no = #{trainNo} LIMIT 1
+    </select>
+
+    <select id="listByCondition" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/> FROM train
+        <where>
+            <if test="startStation != null and startStation != ''">
+                AND start_station = #{startStation}
+            </if>
+            <if test="endStation != null and endStation != ''">
+                AND end_station = #{endStation}
+            </if>
+            <if test="status != null">
+                AND status = #{status}
+            </if>
+        </where>
+        ORDER BY start_time ASC
+    </select>
+
+    <!-- runDays 形如 '1111111'，从周一到周日；runDate 形如 '2026-06-10'（周一） -->
+    <select id="countRunningOnDate" resultType="int">
+        SELECT COUNT(*) FROM train
+        WHERE train_no = #{trainNo}
+          AND status = 1
+          AND SUBSTRING(run_days, WEEKDAY(#{runDate}) + 1, 1) = '1'
+    </select>
+
+    <update id="updateById" parameterType="com.railway.trainstock.entity.TrainDO">
+        UPDATE train
+        <set>
+            <if test="trainType    != null">train_type    = #{trainType},</if>
+            <if test="startStation != null">start_station = #{startStation},</if>
+            <if test="endStation   != null">end_station   = #{endStation},</if>
+            <if test="startTime    != null">start_time    = #{startTime},</if>
+            <if test="endTime      != null">end_time      = #{endTime},</if>
+            <if test="runDays      != null">run_days      = #{runDays},</if>
+            <if test="status       != null">status        = #{status},</if>
+        </set>
+        WHERE id = #{id}
+    </update>
+
+    <delete id="deleteById">
+        DELETE FROM train WHERE id = #{id}
+    </delete>
+
+</mapper>

@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.railway.trainstock.mapper.TrainSeatStockMapper">
+
+    <resultMap id="BaseResultMap" type="com.railway.trainstock.entity.TrainSeatStockDO">
+        <id     column="id"         property="id"/>
+        <result column="train_no"   property="trainNo"/>
+        <result column="run_date"   property="runDate"/>
+        <result column="seat_type"  property="seatType"/>
+        <result column="total"      property="total"/>
+        <result column="remain"     property="remain"/>
+        <result column="version"    property="version"/>
+        <result column="create_time" property="createTime"/>
+        <result column="update_time" property="updateTime"/>
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        id, train_no, run_date, seat_type, total, remain, version, create_time, update_time
+    </sql>
+
+    <insert id="insert" parameterType="com.railway.trainstock.entity.TrainSeatStockDO">
+        INSERT INTO train_seat_stock (
+            id, train_no, run_date, seat_type, total, remain, version, create_time, update_time
+        ) VALUES (
+            #{id}, #{trainNo}, #{runDate}, #{seatType}, #{total}, #{remain}, 0, #{createTime}, #{updateTime}
+        )
+    </insert>
+
+    <select id="selectById" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/> FROM train_seat_stock WHERE id = #{id}
+    </select>
+
+    <select id="selectByKey" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/> FROM train_seat_stock
+        WHERE train_no = #{trainNo} AND run_date = #{runDate} AND seat_type = #{seatType}
+        LIMIT 1
+    </select>
+
+    <select id="listByTrainDate" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/> FROM train_seat_stock
+        WHERE train_no = #{trainNo} AND run_date = #{runDate}
+        ORDER BY FIELD(seat_type, 'BUSINESS', 'FIRST', 'SECOND', 'STAND')
+    </select>
+
+    <select id="listByTrainNo" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/> FROM train_seat_stock
+        WHERE train_no = #{trainNo}
+        ORDER BY run_date ASC, FIELD(seat_type, 'BUSINESS', 'FIRST', 'SECOND', 'STAND')
+    </select>
+
+    <!-- 乐观锁扣减：remain &gt;= num 才扣；返回受影响行数 -->
+    <update id="decreaseRemainByVersion">
+        UPDATE train_seat_stock
+        SET remain = remain - #{num}, version = version + 1
+        WHERE train_no = #{trainNo}
+          AND run_date  = #{runDate}
+          AND seat_type = #{seatType}
+          AND version   = #{version}
+          AND remain    &gt;= #{num}
+    </update>
+
+    <update id="increaseRemainByVersion">
+        UPDATE train_seat_stock
+        SET remain = remain + #{num}, version = version + 1
+        WHERE train_no = #{trainNo}
+          AND run_date  = #{runDate}
+          AND seat_type = #{seatType}
+          AND version   = #{version}
+    </update>
+
+</mapper>

@@ -15,5 +15,53 @@
     <name>railway-service-train-stock</name>
     <description>车次 + 库存服务（Redis + Lua 原子预占）</description>
 
-    <!-- 阶段五补全依赖：common、mysql、redis -->
+    <dependencies>
+        <!-- 公共模块（JWT/雪花/异常/拦截器/Redis/MyBatis/BCrypt 全部继承） -->
+        <dependency>
+            <groupId>com.railway</groupId>
+            <artifactId>common</artifactId>
+        </dependency>
+
+        <!-- Nacos 注册中心（配置中心 demo 关闭） -->
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-nacos-config</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- 健康检查 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <scope>provided</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <skip>false</skip>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>repackage</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
 </project>
