@@ -25,6 +25,7 @@
 |---|---|---|
 | `开发文档.md` | 阶段化开发计划（11 个阶段，逐阶段目标/文件/验证） | 933 |
 | `项目结构.md` | 目录结构、每个服务放什么、与企业版的差异 | 396 |
+| `测试文档.md` | 22 个 e2e 用例 + 中间件启动指引 + 故障排查 | 380 |
 | `pom.xml` | 父 POM：BOM 导入、`<properties>` 版本号、`<modules>`、pluginManagement | 167 |
 | `db/init.sql` | `railway-real` 库所有表 + 3 辆示例车次 + 库存 | 217 |
 
@@ -47,7 +48,7 @@
 | 8 | service-order（Feign 编排 + RabbitMQ 延迟关单 + 幂等键） | ✅ 完成（38 源文件，jar 81.5MB） | dev 文档 §11 |
 | 9 | service-notification（MQ 消费者 + 通知日志表） | ✅ 完成（10 源文件，jar 67.6MB） | dev 文档 §12 |
 | 10 | service-search（ES 检索 + 座位余票） | ✅ 完成（8 源文件，jar 86.0MB） | dev 文档 §13 |
-| 11 | 联调 / 压测 | ⏳ **下一个** | dev 文档 §14 |
+| 11 | 联调 + 单元测试 + E2E 文档 | ✅ 完成（60 单测全绿，E2E 文档已写） | `测试文档.md` |
 
 **当前可构建**：common + gateway + service-user + service-train-stock + service-ticket + service-payment + service-order + service-notification + service-search（**9/9 全部模块**）。
 ```bash
@@ -783,6 +784,55 @@ curl -X POST http://localhost:9200/train_index/_doc/G1234?refresh=true -H "Conte
 ---
 
 **TL;DR**：
-- 现在做完了 9/9 全模块（common + gateway + 7 service-*），能编译能打包，**没跑过**。
-- 下一个任务：**阶段 11 联调 / 压测**（dev 文档 §14），重点是修潜在 bug、起中间件、跑通 e2e。
+- 11/11 全阶段已完成（含 Stage 11 联调 + 单元测试 + E2E 文档）。
+- 9/9 模块 `mvn package` BUILD SUCCESS；**60 个单元测试全绿**（common 24 + service 5×6=36，跨 6 个模块）。
+- 修了 3 个 Stage 11 必查 bug：`WebAutoConfiguration` 显式注册 `GlobalExceptionHandler` bean / `TrainController.getSeats` 加 `@AuthIgnore` / 6 个 service yml 密码 `root→123456`。
+- MySQL `railway-real` 已 init（9 表 + 3 辆示例车 + 12 行库存）。
+- **要跑 e2e** 看 `测试文档.md` §3 — 中间件未实际启动前不能 e2e（Redis/Nacos/RabbitMQ/ES 都未 listening）。
 - 别碰 Nacos 配置中心、别装 MyBatis-Plus、别动 common 的 servlet 拦截器。
+
+---
+
+## 12. Stage 11 联调记录
+
+### 12.1 已修 Bug
+
+| # | 文件 | 修复 |
+|---|---|---|
+| 1 | `common/src/main/java/com/railway/common/auto/WebAutoConfiguration.java` | 新增 `@Bean @ConditionalOnMissingBean GlobalExceptionHandler globalExceptionHandler()` — 解决 common 的 `@ControllerAdvice` 跨包被 `ServiceXxxApplication` 默认扫描范围漏掉的问题 |
+| 2 | `service-train-stock/src/main/java/com/railway/trainstock/controller/TrainController.java#getSeats` | 加 `@AuthIgnore` — service-search 经 OpenFeign 直连此端点，**不能**经 gateway 注入 X-User-* 头 |
+| 3 | 6 个 service 的 `application.yml` | `password: root` → `password: 123456`（本机 MySQL root 密码探测得到 123456） |
+
+### 12.2 单元测试覆盖（60/60 PASS）
+
+```bash
+mvn -pl common,service-user,service-train-stock,service-ticket,service-payment,service-order test
+```
+
+| 模块 | 文件 | 方法数 | 关键覆盖 |
+|---|---|---|---|
+| common | `ErrorCodeTest` | 4 | 段位 / 重复 code / 通用码 |
+| common | `RTest` | 5 | 工厂 / isSuccess / ErrorCode 转换 |
+| common | `IdCardValidatorTest` | 4 | 合法 / 非法 / 脱敏 / null |
+| common | `JwtUtilTest` | 4 | 签发解析 / 过期 / 非法 / 密钥 |
+| common | `SnowflakeIdWorkerTest` | 7 | 单调 / 不同 worker / 边界 |
+| service-user | `AuthServiceImplTest` | 7 | 注册 / 登录 / 用户名重复 / 禁用 / 密码错 / 成功 |
+| service-train-stock | `StockServiceImplTest` | 8 | happy / Lua 不足 / DB 冲突 / release / warn |
+| service-ticket | `TicketServiceImplTest` | 10 | happy / 幂等 / 身份证不合法 / 池空 / 状态机 / mask |
+| service-payment | `PayServiceImplTest` | 6 | 成功发 MQ / 幂等不发 / 失败发 MQ / 不存在 |
+| service-order | `OrderServiceImplTest` | 5 | happy / null user / >5 人 / 库存不足 / 票失败补偿 |
+
+测试套件全部用 Mockito（`@ExtendWith(MockitoExtension.class)` + `@Mock` + `@InjectMocks`），**不连真实中间件**。Manager 层（OrderStockManager 等）也 mock 掉，让 service 单测只测本类编排。
+
+### 12.3 E2E 测试文档
+
+完整路径：`测试文档.md`（约 380 行）。要点：
+- §3.3 4 个中间件启动指引（MySQL/Nacos/Redis/RabbitMQ，ES 可选）
+- §3.4 服务启动顺序（业务服务 → gateway）
+- §3.5 **T1~T22 共 22 个 e2e 用例**：注册/登录/乘车人/查车次/查座位/下单/幂等/支付/取消/权限/超时关单/压测
+- §4 故障排查 checklist
+
+### 12.4 当前 e2e 状态
+
+❌ **未实际跑过 e2e**：本机只有 MySQL 在跑；Redis/Nacos/RabbitMQ/ES 都未启动。
+✅ **E2E 已可跑**：等用户本地启中间件后，按 `测试文档.md` §3 执行即可，预期约 45min 完成 22 用例。

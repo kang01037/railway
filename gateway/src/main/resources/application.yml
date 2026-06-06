@@ -1,4 +1,4 @@
-server:
+﻿server:
   port: 9000
 
 spring:
@@ -8,11 +8,11 @@ spring:
     nacos:
       discovery:
         server-addr: 127.0.0.1:8848
-      # demo 阶段配置中心关闭，避免启动必须连 Nacos
+      # demo 闃舵閰嶇疆涓績鍏抽棴锛岄伩鍏嶅惎鍔ㄥ繀椤昏繛 Nacos
       config:
         enabled: false
     gateway:
-      # 不开 locator（避免按 service-id 自动建路由），只走手写 routes
+      # 涓嶅紑 locator锛堥伩鍏嶆寜 service-id 鑷姩寤鸿矾鐢憋級锛屽彧璧版墜鍐?routes
       discovery:
         locator:
           enabled: false
@@ -71,22 +71,18 @@ spring:
             allowCredentials: true
             maxAge: 3600
 
-# 网关鉴权白名单（Ant 风格）
-gateway:
+# 缃戝叧閴存潈鐧藉悕鍗曪紙Ant 椋庢牸锛?gateway:
   public-paths:
     - /api/user/auth/login
     - /api/user/auth/register
-    # 支付回调（第三方 → 我方）
-    - /api/payment/callback/**
+    # 鏀粯鍥炶皟锛堢涓夋柟 鈫?鎴戞柟锛?    - /api/payment/callback/**
 
-# JWT 配置（必须与 service-user 一致，否则 token 校验失败）
-jwt:
+# JWT 閰嶇疆锛堝繀椤讳笌 service-user 涓€鑷达紝鍚﹀垯 token 鏍￠獙澶辫触锛?jwt:
   secret: 0123456789abcdef0123456789abcdef0123456789abcdef
   expire-minutes: 120
   issuer: railway
 
-# 雪花：网关自己用不到，但引入 common 包会带 SnowflakeIdWorker，这里显式给个值
-snowflake:
+# 闆姳锛氱綉鍏宠嚜宸辩敤涓嶅埌锛屼絾寮曞叆 common 鍖呬細甯?SnowflakeIdWorker锛岃繖閲屾樉寮忕粰涓€?snowflake:
   worker-id: 0
 
 management:

@@ -1,5 +1,6 @@
 package com.railway.trainstock.controller;
 
+import com.railway.common.annotation.AuthIgnore;
 import com.railway.common.annotation.RequireRole;
 import com.railway.common.model.R;
 import com.railway.trainstock.dto.query.TrainQuery;
@@ -73,8 +74,10 @@ public class TrainController {
 
     /**
      * 查某车次某天的座位余票明细（**service-search Feign 内部调用**）。
-     * <p>返回 {seatType: {seatType, total, remain}}。{@code @AuthIgnore} 已在 SearchController 上声明。
+     * <p>返回 {seatType: {seatType, total, remain}}。
+     * <p>{@code @AuthIgnore}：Feign 直连不经过 gateway，service-search 也无 token 透传。
      */
+    @AuthIgnore
     @GetMapping("/{trainNo}/seats")
     public R<Map<String, Object>> getSeats(
             @PathVariable String trainNo,

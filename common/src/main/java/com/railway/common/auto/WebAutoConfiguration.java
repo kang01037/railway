@@ -7,11 +7,13 @@ import com.railway.common.config.RedisConfig;
 import com.railway.common.config.RedisLuaConfig;
 import com.railway.common.config.SecurityConfig;
 import com.railway.common.config.WebConfig;
+import com.railway.common.exception.GlobalExceptionHandler;
 import com.railway.common.interceptor.AuthInterceptor;
 import com.railway.common.util.JwtUtil;
 import com.railway.common.util.SnowflakeIdWorker;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -74,6 +76,17 @@ public class WebAutoConfiguration {
     @Bean
     public RequireRoleAspect requireRoleAspect() {
         return new RequireRoleAspect();
+    }
+
+    /**
+     * 全局异常处理。{@link GlobalExceptionHandler} 本身是 {@code @ControllerAdvice}，
+     * 但 Spring Boot 不会自动扫 {@code com.railway.common} 包（业务 {@code @SpringBootApplication}
+     * 只扫自己包），显式注册为 Bean。
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public GlobalExceptionHandler globalExceptionHandler() {
+        return new GlobalExceptionHandler();
     }
 
     /**

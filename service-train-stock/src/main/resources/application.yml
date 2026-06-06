@@ -1,4 +1,4 @@
-server:
+﻿server:
   port: 9102
 
 spring:
@@ -8,13 +8,13 @@ spring:
     nacos:
       discovery:
         server-addr: 127.0.0.1:8848
-      # demo 阶段配置中心关闭
+      # demo 闃舵閰嶇疆涓績鍏抽棴
       config:
         enabled: false
   datasource:
     url: jdbc:mysql://127.0.0.1:3306/railway-real?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf8
     username: root
-    password: root
+    password: 123456
     driver-class-name: com.mysql.cj.jdbc.Driver
   data:
     redis:
@@ -34,14 +34,13 @@ pagehelper:
   reasonable: true
   support-methods-arguments: true
 
-# JWT（与 service-user 一致）
+# JWT锛堜笌 service-user 涓€鑷达級
 jwt:
   secret: 0123456789abcdef0123456789abcdef0123456789abcdef
   expire-minutes: 120
   issuer: railway
 
-# 雪花 worker-id：本服务 2（gateway=0, user=1, train-stock=2, ticket=3, payment=4, order=5, notification=6, search=7）
-snowflake:
+# 闆姳 worker-id锛氭湰鏈嶅姟 2锛坓ateway=0, user=1, train-stock=2, ticket=3, payment=4, order=5, notification=6, search=7锛?snowflake:
   worker-id: 2
 
 management:

@@ -1,4 +1,4 @@
-server:
+﻿server:
   port: 9106
 
 spring:
@@ -13,7 +13,7 @@ spring:
   datasource:
     url: jdbc:mysql://127.0.0.1:3306/railway-real?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf8
     username: root
-    password: root
+    password: 123456
     driver-class-name: com.mysql.cj.jdbc.Driver
   rabbitmq:
     host: 127.0.0.1
@@ -23,7 +23,7 @@ spring:
     virtual-host: /
     listener:
       simple:
-        acknowledge-mode: auto            # 处理失败进 retry / DLQ
+        acknowledge-mode: auto            # 澶勭悊澶辫触杩?retry / DLQ
         prefetch: 10
         retry:
           enabled: true
@@ -38,8 +38,7 @@ mybatis:
     map-underscore-to-camel-case: true
     log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
 
-# 雪花：通知服务无需生成 ID，列出来源启动时不报错
-snowflake:
+# 闆姳锛氶€氱煡鏈嶅姟鏃犻渶鐢熸垚 ID锛屽垪鍑烘潵婧愬惎鍔ㄦ椂涓嶆姤閿?snowflake:
   worker-id: 6
 
 management:

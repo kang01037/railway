@@ -1,4 +1,4 @@
-server:
+﻿server:
   port: 9101
   servlet:
     context-path: /
@@ -15,12 +15,12 @@ spring:
         server-addr: 127.0.0.1:8848
         namespace: public
         file-extension: yaml
-        # 不从 Nacos 拉配置，本地直配（demo 模式）；生产改为 import 方式
+        # 涓嶄粠 Nacos 鎷夐厤缃紝鏈湴鐩撮厤锛坉emo 妯″紡锛夛紱鐢熶骇鏀逛负 import 鏂瑰紡
         enabled: false
   datasource:
     url: jdbc:mysql://127.0.0.1:3306/railway-real?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf8&allowPublicKeyRetrieval=true
     username: root
-    password: root
+    password: 123456
     driver-class-name: com.mysql.cj.jdbc.Driver
     hikari:
       maximum-pool-size: 10
@@ -38,8 +38,7 @@ spring:
           max-idle: 8
           min-idle: 0
 
-# MyBatis（由 common 提供 PageInterceptor / @MapperScan）
-mybatis:
+# MyBatis锛堢敱 common 鎻愪緵 PageInterceptor / @MapperScan锛?mybatis:
   mapper-locations: classpath:mapper/*.xml
   type-aliases-package: com.railway.user.entity
   configuration:
@@ -47,30 +46,27 @@ mybatis:
     log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
     default-fetch-size: 100
 
-# PageHelper（由 pagehelper-spring-boot-starter 自动装配，可在此覆盖）
-pagehelper:
+# PageHelper锛堢敱 pagehelper-spring-boot-starter 鑷姩瑁呴厤锛屽彲鍦ㄦ瑕嗙洊锛?pagehelper:
   helper-dialect: mysql
   reasonable: true
   support-methods-arguments: true
   params: count=countSql
 
-# JWT（绑定到 common 的 JwtUtil）
-jwt:
+# JWT锛堢粦瀹氬埌 common 鐨?JwtUtil锛?jwt:
   secret: 0123456789abcdef0123456789abcdef0123456789abcdef
   expire-minutes: 120
   issuer: railway-real
 
-# 雪花（绑定到 common 的 SnowflakeIdWorker）
-# 多实例部署时建议用 K8s POD_NAME 注入不同 workerId
+# 闆姳锛堢粦瀹氬埌 common 鐨?SnowflakeIdWorker锛?# 澶氬疄渚嬮儴缃叉椂寤鸿鐢?K8s POD_NAME 娉ㄥ叆涓嶅悓 workerId
 snowflake:
   worker-id: 1
 
-# 日志
+# 鏃ュ織
 logging:
   level:
     root: info
     com.railway: debug
-    com.railway.user.mapper: debug   # 打印 SQL
+    com.railway.user.mapper: debug   # 鎵撳嵃 SQL
 
 # Actuator
 management:
