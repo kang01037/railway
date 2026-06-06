@@ -14,6 +14,9 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.HandlerInterceptor;
 
+import java.util.HashSet;
+import java.util.Set;
+
 /**
  * 鉴权拦截器：
  * <ol>
@@ -43,6 +46,30 @@ public class AuthInterceptor implements HandlerInterceptor {
                 || hm.getBeanType().getAnnotation(AuthIgnore.class) != null) {
             return true;
         }
+
+        // 1. 优先：网关已解析过，透传 X-User-* 头（生产路径）
+        String headerUserId = request.getHeader(HeaderConstant.X_USER_ID);
+        if (StringUtils.hasText(headerUserId)) {
+            LoginUser user = new LoginUser();
+            user.setUserId(Long.valueOf(headerUserId));
+            user.setUsername(request.getHeader(HeaderConstant.X_USER_NAME));
+            String roles = request.getHeader(HeaderConstant.X_USER_ROLES);
+            if (StringUtils.hasText(roles)) {
+                Set<String> set = new HashSet<>();
+                for (String r : roles.split(",")) {
+                    if (!r.isBlank()) {
+                        set.add(r.trim());
+                    }
+                }
+                user.setRoles(set);
+            } else {
+                user.setRoles(new HashSet<>());
+            }
+            UserContext.set(user);
+            return true;
+        }
+
+        // 2. 兜底：直连服务场景，自己解析 JWT
         String authHeader = request.getHeader(HeaderConstant.AUTHORIZATION);
         if (!StringUtils.hasText(authHeader) || !authHeader.startsWith(HeaderConstant.BEARER_PREFIX)) {
             throw new BizException(ErrorCode.UNAUTHORIZED, "缺少 Authorization 头");
