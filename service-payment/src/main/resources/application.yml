@@ -1,0 +1,67 @@
+server:
+  port: 9104
+
+spring:
+  application:
+    name: service-payment
+  cloud:
+    nacos:
+      discovery:
+        server-addr: 127.0.0.1:8848
+      config:
+        enabled: false
+  datasource:
+    url: jdbc:mysql://127.0.0.1:3306/railway-real?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf8
+    username: root
+    password: root
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  data:
+    redis:
+      host: 127.0.0.1
+      port: 6379
+      timeout: 2s
+  rabbitmq:
+    host: 127.0.0.1
+    port: 5672
+    username: guest
+    password: guest
+    virtual-host: /
+    publisher-confirm-type: correlated   # 发送端确认（demo 阶段不开 confirm callback，仅开类型）
+    publisher-returns: true
+
+mybatis:
+  mapper-locations: classpath:mapper/*.xml
+  type-aliases-package: com.railway.payment.entity
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+
+pagehelper:
+  helper-dialect: mysql
+  reasonable: true
+  support-methods-arguments: true
+
+jwt:
+  secret: 0123456789abcdef0123456789abcdef0123456789abcdef
+  expire-minutes: 120
+  issuer: railway
+
+snowflake:
+  worker-id: 4
+
+# 支付回调的"网关层"目标地址（用于拼接 payUrl）。demo 写死 gateway 地址。
+pay:
+  callback-base-url: http://localhost:9000/api/payment/callback
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when_authorized
+
+logging:
+  level:
+    com.railway: debug

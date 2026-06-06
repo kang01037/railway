@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.railway.payment.mapper.PayRecordMapper">
+
+    <resultMap id="BaseResultMap" type="com.railway.payment.entity.PayRecordDO">
+        <id     column="id"          property="id"/>
+        <result column="pay_no"      property="payNo"/>
+        <result column="order_no"    property="orderNo"/>
+        <result column="amount"      property="amount"/>
+        <result column="pay_channel" property="payChannel"/>
+        <result column="status"      property="status"/>
+        <result column="paid_time"   property="paidTime"/>
+        <result column="create_time" property="createTime"/>
+        <result column="update_time" property="updateTime"/>
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        id, pay_no, order_no, amount, pay_channel, status, paid_time, create_time, update_time
+    </sql>
+
+    <insert id="insert" parameterType="com.railway.payment.entity.PayRecordDO">
+        INSERT INTO pay_record (
+            id, pay_no, order_no, amount, pay_channel, status, create_time, update_time
+        ) VALUES (
+            #{id}, #{payNo}, #{orderNo}, #{amount}, #{payChannel}, #{status}, #{createTime}, #{updateTime}
+        )
+    </insert>
+
+    <select id="selectById" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/> FROM pay_record WHERE id = #{id}
+    </select>
+
+    <select id="selectByPayNo" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/> FROM pay_record WHERE pay_no = #{payNo} LIMIT 1
+    </select>
+
+    <select id="selectByOrderNo" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/> FROM pay_record
+        WHERE order_no = #{orderNo}
+        ORDER BY id DESC LIMIT 1
+    </select>
+
+    <select id="listByOrderNo" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/> FROM pay_record
+        WHERE order_no = #{orderNo}
+        ORDER BY id DESC
+    </select>
+
+    <!-- 状态机：仅从 0 改起，幂等 -->
+    <update id="updateStatusFromPending">
+        UPDATE pay_record
+        SET status = #{newStatus}, paid_time = NOW()
+        WHERE pay_no = #{payNo} AND status = 0
+    </update>
+
+</mapper>
