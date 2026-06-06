@@ -13,7 +13,62 @@
     <artifactId>service-user</artifactId>
     <packaging>jar</packaging>
     <name>railway-service-user</name>
-    <description>用户服务（注册 / 登录 / 乘车人）</description>
+    <description>用户服务：注册 / 登录 / 乘车人</description>
 
-    <!-- 阶段三补全依赖：common、nacos-discovery、nacos-config、openfeign、mysql -->
+    <dependencies>
+        <!-- 公共模块（JWT/雪花/异常/拦截器/Redis/MyBatis/Jackson/BCrypt 全部继承） -->
+        <dependency>
+            <groupId>com.railway</groupId>
+            <artifactId>common</artifactId>
+        </dependency>
+
+        <!-- Nacos 注册中心 + 配置中心 -->
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-nacos-config</artifactId>
+        </dependency>
+
+        <!-- OpenFeign（服务间调用，本服务作为提供方，本阶段暂不调用其他服务，预留） -->
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-openfeign</artifactId>
+        </dependency>
+
+        <!-- Actuator（健康检查 / 指标，供 Nacos 探活） -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+
+        <!-- Lombok（compile only，provided 不向下传递，需显式声明） -->
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <scope>provided</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!-- 业务模块启用 spring-boot-maven-plugin，覆盖父 POM 的 skip=true -->
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <skip>false</skip>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>repackage</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
 </project>
