@@ -42,18 +42,17 @@
 | 3 | service-user（17 源文件） | ✅ 完成 | `service-user/pom.xml`, `UserApplication.java` |
 | 4 | gateway（5 源文件，webflux 鉴权 + TraceId） | ✅ 完成 | `gateway/pom.xml`, `GatewayApplication.java` |
 | 5 | service-train-stock（23 源文件，Redis+Lua 原子预占） | ✅ 完成 | `service-train-stock/pom.xml`, `TrainStockApplication.java` |
-| 6 | service-ticket | ⏳ **下一个** | dev 文档 §9 |
-| 7 | service-payment | ⏳ | dev 文档 §10 |
+| 6 | service-ticket（13 源文件，票号 + 状态机） | ✅ 完成 | `service-ticket/pom.xml`, `TicketApplication.java` |
+| 7 | service-payment | ⏳ **下一个** | dev 文档 §10 |
 | 8 | service-order（Feign 编排 + RabbitMQ 延迟） | ⏳ | dev 文档 §11 |
 | 9 | service-notification（MQ 消费者） | ⏳ | dev 文档 §12 |
 | 10 | service-search（ES 检索） | ⏳ | dev 文档 §13 |
 | 11 | 联调 / 压测 | ⏳ | dev 文档 §14 |
 
-**当前可构建**：common + gateway + service-user + service-train-stock（4 个模块）。
+**当前可构建**：common + gateway + service-user + service-train-stock + service-ticket（5 个模块）。
 ```bash
-mvn -pl service-train-stock -am clean package -DskipTests   # 69.6 MB fat jar
-mvn -pl gateway           -am clean package -DskipTests    # 82.7 MB fat jar
-mvn -pl service-user      -am clean package -DskipTests    # 79.3 MB fat jar
+mvn -pl common,gateway,service-user,service-train-stock,service-ticket -am clean package -DskipTests
+→ 5/5 BUILD SUCCESS（jar 大小 38KB / 82.7 / 79.3 / 69.6 / 69.6 MB）
 ```
 
 ---
@@ -265,6 +264,55 @@ confirm:
 
 ---
 
+## 6c. service-ticket 模块
+
+> 路径：`service-ticket/src/main/java/com/railway/ticket/`
+> 端口 9103。被 service-order 通过 Feign 调用，**用户也能经 gateway 查自己订单的票**。
+
+### 6c.1 实体 / Mapper
+
+| Entity | 表 | Mapper 关键方法 |
+|---|---|---|
+| `TicketDO` | `ticket` | `TicketMapper`（`selectByTicketNo`, `listByOrderNo`, `countByOrderNo`, **`confirmByOrderNo` SQL 0→1**, **`cancelByOrderNo` SQL 0/1→3**） |
+
+### 6c.2 状态机
+
+```
+0-待支付 ──confirm──▶ 1-已出票 ──cancel──▶ 3-已退
+   │
+   └──cancel──▶ 3-已退
+```
+
+- `confirmByOrderNo` 的 SQL 带 `WHERE status = 0` —— 重复 confirm 0 行，影响 0 行（幂等）。
+- `cancelByOrderNo` 的 SQL 带 `WHERE status IN (0,1)` —— 只退未改签/未退的票；2-已改签 不在此处理。
+- `status = 2 (已改签)` 暂未实现流程，SQL 不动它。
+
+### 6c.3 Controller 路径
+
+| 端点 | 方法 | 鉴权 | 用途 |
+|---|---|---|---|
+| `POST /tickets/issue` | `issue(IssueDTO)` | `@AuthIgnore` | service-order 调（Feign） |
+| `POST /tickets/confirm` | `confirm(ConfirmDTO)` | `@AuthIgnore` | 支付回调后调 |
+| `POST /tickets/cancel` | `cancel(CancelDTO)` | `@AuthIgnore` | 取消订单时调 |
+| `GET  /tickets/order/{orderNo}` | `listByOrderNo` | 需登录 | 用户查订单的票 |
+| `GET  /tickets/{ticketNo}` | `getByTicketNo` | 需登录 | 查单张票 |
+
+### 6c.4 关键服务 / Manager
+
+| 类 | 职责 |
+|---|---|
+| `manager/SeatPoolManager` | **Redis Set `SEAT_POOL:{trainNo}:{date}:{seatType}`**：`initIfAbsent` 懒加载（用 SADD 1..total 初始化 + 1d TTL）；`pop` 用 SPOP 拿一个座位号；`push` 退回座位号（cancel 时调用）。 |
+| `service/TicketService.issue` | **幂等**：`countByOrderNo > 0` 直接返回已存在的票号；否则循环生成 N 张票（`passengers.size()`），每张用雪花 ID 作 `ticketNo`（`T` 前缀），从座位池 SPOP 选座，写库 status=0。 |
+| `service/TicketService.confirm` | `UPDATE WHERE status=0`，**0 行不影响**（幂等）。 |
+| `service/TicketService.cancel` | `UPDATE WHERE status IN (0,1)`，然后遍历 `listByOrderNo` 把新退的票座位 `push` 回池。 |
+
+### 6c.5 Redis Key 命名
+
+- `SEAT_POOL:{trainNo}:{runDate}:{seatType}` → SET（座位号 `1` `2` `3` ... `total`）
+- 座位号 demo 阶段是纯数字串，carriageNo 固定 1；后续要细化"1A/1B/多车厢"改 `SeatPoolManager` 一处即可。
+
+---
+
 ## 7. 关键约定（**违反会被打回**）
 
 ### 7.1 MyBatis（**不要用 MyBatis-Plus**）
@@ -405,29 +453,30 @@ java -jar service-user/target/service-user-1.0.0-SNAPSHOT.jar
 
 ---
 
-## 9. 接下来要做（**阶段 6：service-ticket**）
+## 9. 接下来要做（**阶段 7：service-payment**）
 
-参考 `开发文档.md` §9（line 644~），核心动作：
+参考 `开发文档.md` §10（line 685~），核心动作：
 
-1. `service-ticket/pom.xml`：copy `service-train-stock` 的依赖（不需要 openfeign）。
-2. 实体 `TicketDO`（表 `ticket`，10 个业务字段含 `ticket_no` / `order_no` / `passenger_id` / `id_card_no` 冗余 / `price` DECIMAL(10,2) / `status` 0-待支付 1-已出票 2-已改签 3-已退）。
-3. `TicketMapper` + `TicketMapper.xml`（按 orderNo 查、按 id 改 status）。
-4. DTO：`IssueTicketDTO`（含 `passengerId` / `passengerName` / `idCardNo` / `seatType` / `price` 冗余字段，**Feign 入参用**）。
-5. VO：`TicketVO`、`TicketListVO`。
-6. `TicketService`：
-   - `issue(orderNo, trainNo, runDate, seatType, passengerList, price)` —— 按 `num = passengerList.size()` 循环生成 N 张票，状态 0-待支付。
-   - `confirmByOrderNo(orderNo)` —— 支付成功后改 status=1。
-   - `cancelByOrderNo(orderNo)` —— 改 status=3。
-   - `listByOrderNo(orderNo)` —— 给前端展示。
-7. `TicketController`：
-   - `POST /tickets/issue` `@AuthIgnore`（service-order 调）
-   - `POST /tickets/{orderNo}/confirm` `@AuthIgnore`
-   - `POST /tickets/{orderNo}/cancel` `@AuthIgnore`
-   - `GET /tickets/order/{orderNo}` 需登录
-8. `application.yml`：port 9103，worker-id=3。
-9. 跑 `mvn -pl service-ticket -am clean package -DskipTests`。
+1. `service-payment/pom.xml`：copy `service-ticket` 的依赖 + 加 `spring-boot-starter-amqp`（RabbitMQ）。
+2. 实体 `PayRecordDO`（表 `pay_record`，5 字段：`payNo` / `orderNo` / `amount` / `payChannel` ALIPAY/WECHAT/SIM / `status` 0-待支付 1-成功 2-失败 3-已关闭 / `paidTime`）。
+3. `PayRecordMapper` + `PayRecordMapper.xml`：`insert` / `selectByOrderNo` / `selectByPayNo` / `updateStatus`。
+4. DTO：`CreatePayDTO`（orderNo, amount, channel）、`CallbackDTO`（payNo, success）。
+5. VO：`PayVO`（payNo, orderNo, payUrl, status）。
+6. `PayService`：
+   - `createPay(orderNo, amount, channel)` —— 雪花生成 `payNo`，插 pay_record status=0，返回 `payUrl=http://localhost:9000/api/payment/callback/sim?payNo=xxx`。
+   - `callback(payNo, success)` —— `updateStatus`，**发 RabbitMQ `order.paid`**（`orderNo`, `payNo`, `success`），由 service-order 消费。
+7. `PayController`：
+   - `POST /pay/create` 需登录（用户下单后调）
+   - `POST /pay/callback/sim` `@AuthIgnore`（模拟支付回调，gateway 白名单 `/api/payment/callback/**`）
+   - `GET /pay/{payNo}` 需登录
+8. `MqConfig`（common 里没有，需要在 service-payment 自己写）声明队列/交换机/绑定。
+9. `application.yml`：port 9104，worker-id=4，加 `spring.rabbitmq.*`。
+10. 跑 `mvn -pl service-payment -am clean package -DskipTests`。
 
-> **注意**：ticket 状态机是**幂等**的——confirm 多次调用 = 保持 status=1；cancel 多次调用 = 保持 status=3。Service 内部用 UPDATE WHERE status=0/1 加乐观条件。
+> **关键点**：
+> - 模拟支付：service-payment 暴露一个 `callback/sim` 端点，前端轮询时调用即视为"用户已付款"。
+> - 发 MQ 消息体用 `Map.of("orderNo", ..., "payNo", ..., "success", true)`；`MqConstant` 已在 common 定义，**生产端**仅复用常量。
+> - `OrderPaidConsumer` 在 service-order 写（阶段 8），**不要**在 service-payment 消费自己的消息。
 
 ---
 
@@ -443,8 +492,9 @@ java -jar service-user/target/service-user-1.0.0-SNAPSHOT.jar
 | 阶段 3 user 完整代码 | `开发文档.md` line 437-... |
 | 阶段 4 gateway | `开发文档.md` line 438-500 |
 | 阶段 5 train-stock | `开发文档.md` line 502-641 |
-| 阶段 6 ticket | `开发文档.md` line 644-... |
-| 阶段 8 order 编排 | `开发文档.md` line ~680-... |
+| 阶段 6 ticket | `开发文档.md` line 644-683 |
+| 阶段 7 payment | `开发文档.md` line 685-... |
+| 阶段 8 order 编排 | `开发文档.md` line ~718-... |
 | 雪花算法布局 | `开发文档.md` line ~244 + `common/src/main/java/.../SnowflakeIdWorker.java` |
 | Lua 脚本全文 | `common/src/main/resources/lua/*.lua` |
 | JWT 解析实现 | `common/src/main/java/com/railway/common/util/JwtUtil.java` |
@@ -452,6 +502,8 @@ java -jar service-user/target/service-user-1.0.0-SNAPSHOT.jar
 | 网关鉴权 filter | `gateway/src/main/java/com/railway/gateway/filter/AuthGlobalFilter.java` |
 | 库存原子性流程 | `service-train-stock/src/main/java/.../service/impl/StockServiceImpl.java` |
 | StockManager 封装 | `service-train-stock/src/main/java/.../manager/StockManager.java` |
+| 票状态机 SQL | `service-ticket/src/main/resources/mapper/TicketMapper.xml` |
+| 座位池 SPOP | `service-ticket/src/main/java/.../manager/SeatPoolManager.java` |
 
 ---
 
@@ -468,6 +520,6 @@ java -jar service-user/target/service-user-1.0.0-SNAPSHOT.jar
 ---
 
 **TL;DR**：
-- 现在做完了 common + gateway + service-user + service-train-stock 四块，能编译能打包，**没跑过**。
-- 下一个任务：阶段 6 service-ticket，按 `开发文档.md` §9 实施，**重点是状态机幂等**。
+- 现在做完了 common + gateway + service-user + service-train-stock + service-ticket 五块，能编译能打包，**没跑过**。
+- 下一个任务：阶段 7 service-payment，按 `开发文档.md` §10 实施，**重点是 RabbitMQ 消息发送 + 模拟回调**。
 - 别碰 Nacos 配置中心、别装 MyBatis-Plus、别动 common 的 servlet 拦截器。

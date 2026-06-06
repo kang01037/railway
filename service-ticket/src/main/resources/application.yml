@@ -1,0 +1,56 @@
+server:
+  port: 9103
+
+spring:
+  application:
+    name: service-ticket
+  cloud:
+    nacos:
+      discovery:
+        server-addr: 127.0.0.1:8848
+      config:
+        enabled: false
+  datasource:
+    url: jdbc:mysql://127.0.0.1:3306/railway-real?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf8
+    username: root
+    password: root
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  data:
+    redis:
+      host: 127.0.0.1
+      port: 6379
+      timeout: 2s
+
+mybatis:
+  mapper-locations: classpath:mapper/*.xml
+  type-aliases-package: com.railway.ticket.entity
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+
+pagehelper:
+  helper-dialect: mysql
+  reasonable: true
+  support-methods-arguments: true
+
+jwt:
+  secret: 0123456789abcdef0123456789abcdef0123456789abcdef
+  expire-minutes: 120
+  issuer: railway
+
+# 雪花 worker-id: 3
+snowflake:
+  worker-id: 3
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when_authorized
+
+logging:
+  level:
+    com.railway: debug

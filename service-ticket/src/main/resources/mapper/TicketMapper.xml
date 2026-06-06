@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.railway.ticket.mapper.TicketMapper">
+
+    <resultMap id="BaseResultMap" type="com.railway.ticket.entity.TicketDO">
+        <id     column="id"             property="id"/>
+        <result column="ticket_no"      property="ticketNo"/>
+        <result column="order_no"       property="orderNo"/>
+        <result column="train_no"       property="trainNo"/>
+        <result column="run_date"       property="runDate"/>
+        <result column="seat_type"      property="seatType"/>
+        <result column="carriage_no"    property="carriageNo"/>
+        <result column="seat_no"        property="seatNo"/>
+        <result column="passenger_id"   property="passengerId"/>
+        <result column="passenger_name" property="passengerName"/>
+        <result column="id_card_no"     property="idCardNo"/>
+        <result column="price"          property="price"/>
+        <result column="status"         property="status"/>
+        <result column="create_time"    property="createTime"/>
+        <result column="update_time"    property="updateTime"/>
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        id, ticket_no, order_no, train_no, run_date, seat_type,
+        carriage_no, seat_no, passenger_id, passenger_name, id_card_no,
+        price, status, create_time, update_time
+    </sql>
+
+    <insert id="insert" parameterType="com.railway.ticket.entity.TicketDO">
+        INSERT INTO ticket (
+            id, ticket_no, order_no, train_no, run_date, seat_type,
+            carriage_no, seat_no, passenger_id, passenger_name, id_card_no,
+            price, status, create_time, update_time
+        ) VALUES (
+            #{id}, #{ticketNo}, #{orderNo}, #{trainNo}, #{runDate}, #{seatType},
+            #{carriageNo}, #{seatNo}, #{passengerId}, #{passengerName}, #{idCardNo},
+            #{price}, #{status}, #{createTime}, #{updateTime}
+        )
+    </insert>
+
+    <select id="selectById" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/> FROM ticket WHERE id = #{id}
+    </select>
+
+    <select id="selectByTicketNo" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/> FROM ticket WHERE ticket_no = #{ticketNo} LIMIT 1
+    </select>
+
+    <select id="listByOrderNo" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/> FROM ticket
+        WHERE order_no = #{orderNo}
+        ORDER BY id ASC
+    </select>
+
+    <select id="countByOrderNo" resultType="int">
+        SELECT COUNT(*) FROM ticket WHERE order_no = #{orderNo}
+    </select>
+
+    <!-- 状态机：0 → 1（仅作用于待支付） -->
+    <update id="confirmByOrderNo">
+        UPDATE ticket SET status = 1
+        WHERE order_no = #{orderNo} AND status = 0
+    </update>
+
+    <!-- 状态机：0/1 → 3（已退；2-已改签 不在此处理） -->
+    <update id="cancelByOrderNo">
+        UPDATE ticket SET status = 3
+        WHERE order_no = #{orderNo} AND status IN (0, 1)
+    </update>
+
+</mapper>
