@@ -3,7 +3,7 @@ package com.railway.ticket.controller;
 import com.railway.common.annotation.AuthIgnore;
 import com.railway.common.model.R;
 import com.railway.ticket.dto.request.CancelDTO;
-import com.railway.ticket.dto.request.ConfirmDTO;
+import com.railway.ticket.dto.request.IssueByOrderNoDTO;
 import com.railway.ticket.dto.request.IssueDTO;
 import com.railway.ticket.service.TicketService;
 import com.railway.ticket.vo.IssueVO;
@@ -25,7 +25,7 @@ import java.util.List;
  *
  * <p>网关路径：{@code /api/ticket/tickets/**}。
  *
- * <p>{@code /issue | /confirm | /cancel} 为服务间内部接口（{@code @AuthIgnore}），
+ * <p>{@code /preAllocate | /issue | /cancel} 为服务间内部接口（{@code @AuthIgnore}），
  * 仅 service-order 通过 Feign 调用；用户查询走 {@code GET} 系列，需登录。
  */
 @Slf4j
@@ -36,25 +36,28 @@ public class TicketController {
 
     private final TicketService ticketService;
 
+    /** 下单时预占座位（Redis SPOP + 写 MySQL ticket 表 status=0） */
+    @AuthIgnore
+    @PostMapping("/preAllocate")
+    public R<IssueVO> preAllocate(@Valid @RequestBody IssueDTO dto) {
+        return R.ok(ticketService.preAllocate(dto));
+    }
+
+    /** 支付成功后出票（更新 ticket status 0→1） */
     @AuthIgnore
     @PostMapping("/issue")
-    public R<IssueVO> issue(@Valid @RequestBody IssueDTO dto) {
-        return R.ok(ticketService.issue(dto));
+    public R<IssueVO> issue(@Valid @RequestBody IssueByOrderNoDTO dto) {
+        return R.ok(ticketService.issueByOrderNo(dto));
     }
 
-    @AuthIgnore
-    @PostMapping("/confirm")
-    public R<Integer> confirm(@Valid @RequestBody ConfirmDTO dto) {
-        return R.ok(ticketService.confirm(dto));
-    }
-
+    /** 取消/超时：归还座位 */
     @AuthIgnore
     @PostMapping("/cancel")
     public R<Integer> cancel(@Valid @RequestBody CancelDTO dto) {
         return R.ok(ticketService.cancel(dto));
     }
 
-    /** 用户查自己订单的票（需登录）；鉴权在 gateway 透传 userId 即可 */
+    /** 用户查自己订单的票（需登录） */
     @GetMapping("/order/{orderNo}")
     public R<List<TicketVO>> listByOrderNo(@PathVariable String orderNo) {
         return R.ok(ticketService.listByOrderNo(orderNo));

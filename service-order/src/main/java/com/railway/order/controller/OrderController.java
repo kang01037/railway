@@ -1,6 +1,7 @@
 package com.railway.order.controller;
 
 import com.github.pagehelper.PageInfo;
+import com.railway.common.annotation.AuthIgnore;
 import com.railway.common.model.R;
 import com.railway.common.util.UserContext;
 import com.railway.order.aspect.Idempotent;
@@ -66,5 +67,14 @@ public class OrderController {
             @RequestParam(defaultValue = "10") int pageSize) {
         Long userId = UserContext.mustCurrentUserId();
         return R.ok(orderService.listByUserId(userId, pageNum, pageSize));
+    }
+
+    /**
+     * 内部接口：支付成功后同步确认订单（0→1）。
+     */
+    @AuthIgnore
+    @PostMapping("/internal/confirm")
+    public R<Integer> confirm(@RequestParam String orderNo) {
+        return R.ok(orderService.confirmByOrderNo(orderNo));
     }
 }

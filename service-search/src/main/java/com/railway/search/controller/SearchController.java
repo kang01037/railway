@@ -1,5 +1,6 @@
 package com.railway.search.controller;
 
+import com.railway.common.annotation.AuthIgnore;
 import com.railway.common.model.R;
 import com.railway.search.feign.dto.SeatRemainVO;
 import com.railway.search.index.TrainIndex;
@@ -15,7 +16,6 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDate;
 import java.util.List;
-import java.util.Map;
 
 /**
  * 检索接口。网关路径：{@code /api/search/search/**}（gateway StripPrefix=2 → /search/**）。
@@ -24,6 +24,8 @@ import java.util.Map;
  *   <li>{@code GET /search/trains?from=&to=&date=}</li>
  *   <li>{@code GET /search/trains/{trainNo}/seats?date=}</li>
  * </ul>
+ *
+ * <p>{@code @AuthIgnore}：gateway 层已做鉴权，本服务接口允许匿名访问（适用于 service 间 Feign / 直连调试）。
  */
 @Slf4j
 @RestController
@@ -33,6 +35,7 @@ public class SearchController {
 
     private final SearchService searchService;
 
+    @AuthIgnore
     @GetMapping("/trains")
     public R<List<TrainIndex>> searchTrains(@RequestParam(required = false) String from,
                                             @RequestParam(required = false) String to,
@@ -41,10 +44,11 @@ public class SearchController {
         return R.ok(searchService.searchTrains(from, to, date));
     }
 
+    @AuthIgnore
     @GetMapping("/trains/{trainNo}/seats")
-    public R<Map<String, SeatRemainVO>> getSeats(@PathVariable String trainNo,
-                                                 @RequestParam
-                                                 @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+    public R<List<SeatRemainVO>> getSeats(@PathVariable String trainNo,
+                                          @RequestParam
+                                          @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
         return R.ok(searchService.getSeats(trainNo, date));
     }
 }

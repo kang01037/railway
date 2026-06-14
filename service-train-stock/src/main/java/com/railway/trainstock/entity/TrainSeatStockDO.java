@@ -23,6 +23,9 @@ public class TrainSeatStockDO {
     /** BUSINESS / FIRST / SECOND / STAND */
     private String seatType;
 
+    /** 票价 */
+    private java.math.BigDecimal price;
+
     private Integer total;
     private Integer remain;
 

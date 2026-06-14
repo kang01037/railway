@@ -1,4 +1,4 @@
-﻿server:
+server:
   port: 9104
 
 spring:
@@ -49,7 +49,7 @@ snowflake:
   worker-id: 4
 
 # 鏀粯鍥炶皟鐨?缃戝叧灞?鐩爣鍦板潃锛堢敤浜庢嫾鎺?payUrl锛夈€俤emo 鍐欐 gateway 鍦板潃銆?pay:
-  callback-base-url: http://localhost:9000/api/payment/callback
+  callback-base-url: http://localhost:9000/api/payment/pay/callback
 
 management:
   endpoints:

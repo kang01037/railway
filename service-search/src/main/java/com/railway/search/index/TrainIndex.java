@@ -35,13 +35,13 @@ public class TrainIndex {
     @Field(type = FieldType.Keyword)
     private String trainType;                       // G/D/K/T
 
-    @Field(type = FieldType.Text, analyzer = "ik_max_word")
+    @Field(type = FieldType.Text, analyzer = "standard")
     private String startStation;
 
     @Field(type = FieldType.Keyword)
     private String startStationKeyword;
 
-    @Field(type = FieldType.Text, analyzer = "ik_max_word")
+    @Field(type = FieldType.Text, analyzer = "standard")
     private String endStation;
 
     @Field(type = FieldType.Keyword)

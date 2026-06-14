@@ -1,12 +1,11 @@
 package com.railway.payment.mapper;
 
 import com.railway.payment.entity.PayRecordDO;
-import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
 import java.util.List;
 
-@Mapper
+
 public interface PayRecordMapper {
 
     int insert(PayRecordDO record);

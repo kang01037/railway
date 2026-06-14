@@ -74,4 +74,10 @@
         WHERE order_no = #{orderNo} AND status = 1
     </update>
 
+    <!-- 出票失败补偿：1 → 0（回滚到待支付） -->
+    <update id="rollbackConfirm">
+        UPDATE orders SET status = 0
+        WHERE order_no = #{orderNo} AND status = 1
+    </update>
+
 </mapper>

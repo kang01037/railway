@@ -43,4 +43,7 @@ public interface OrderService {
 
     /** 当前用户订单分页。 */
     PageInfo<OrderVO> listByUserId(Long userId, int pageNum, int pageSize);
+
+    /** 内部接口：支付成功后同步确认订单（0→1）+ 确认库存 + 确认出票。 */
+    int confirmByOrderNo(String orderNo);
 }

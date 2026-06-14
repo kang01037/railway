@@ -1,4 +1,4 @@
-﻿server:
+server:
   port: 9000
 
 spring:
@@ -71,11 +71,12 @@ spring:
             allowCredentials: true
             maxAge: 3600
 
-# 缃戝叧閴存潈鐧藉悕鍗曪紙Ant 椋庢牸锛?gateway:
+# 网关鉴权白名单（Ant 风格）
+gateway-auth:
   public-paths:
     - /api/user/auth/login
     - /api/user/auth/register
-    # 鏀粯鍥炶皟锛堢涓夋柟 鈫?鎴戞柟锛?    - /api/payment/callback/**
+    # 鏀粯鍥炶皟锛堢涓夋柟 鈫?鎴戞柟锛?    - /api/payment/pay/callback/**
 
 # JWT 閰嶇疆锛堝繀椤讳笌 service-user 涓€鑷达紝鍚﹀垯 token 鏍￠獙澶辫触锛?jwt:
   secret: 0123456789abcdef0123456789abcdef0123456789abcdef

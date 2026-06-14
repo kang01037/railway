@@ -169,6 +169,7 @@ public class TrainServiceImpl implements TrainService {
         v.setTrainNo(s.getTrainNo());
         v.setRunDate(s.getRunDate());
         v.setSeatType(s.getSeatType());
+        v.setPrice(s.getPrice());
         v.setTotal(s.getTotal());
         v.setRemain(s.getRemain());
         return v;

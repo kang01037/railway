@@ -1,12 +1,11 @@
 package com.railway.user.mapper;
 
 import com.railway.user.entity.PassengerDO;
-import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
 import java.util.List;
 
-@Mapper
+
 public interface PassengerMapper {
 
     int insert(PassengerDO passenger);

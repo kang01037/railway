@@ -36,6 +36,10 @@
             <groupId>org.springframework.cloud</groupId>
             <artifactId>spring-cloud-starter-openfeign</artifactId>
         </dependency>
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-loadbalancer</artifactId>
+        </dependency>
 
         <!-- web 仅为触发 common 的 WebAutoConfiguration（@MapperScan 等），本服务无 MyBatis 用法 -->
         <dependency>

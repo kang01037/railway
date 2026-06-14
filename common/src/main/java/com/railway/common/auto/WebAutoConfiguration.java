@@ -48,6 +48,7 @@ public class WebAutoConfiguration {
      * JwtUtil：{@code jwt.secret} / {@code jwt.expire-minutes} / {@code jwt.issuer} 从 yml 绑定。
      */
     @Bean
+    @ConditionalOnMissingBean
     @ConfigurationProperties(prefix = "jwt")
     public JwtUtil jwtUtil() {
         return new JwtUtil();
@@ -57,6 +58,7 @@ public class WebAutoConfiguration {
      * SnowflakeIdWorker：{@code snowflake.worker-id} 从 yml 绑定。
      */
     @Bean
+    @ConditionalOnMissingBean
     @ConfigurationProperties(prefix = "snowflake")
     public SnowflakeIdWorker snowflakeIdWorker() {
         return new SnowflakeIdWorker();
@@ -66,6 +68,7 @@ public class WebAutoConfiguration {
      * 鉴权拦截器。
      */
     @Bean
+    @ConditionalOnMissingBean
     public AuthInterceptor authInterceptor(JwtUtil jwtUtil) {
         return new AuthInterceptor(jwtUtil);
     }
@@ -74,6 +77,7 @@ public class WebAutoConfiguration {
      * 角色切面（@Aspect 注解 + 容器管理，自动织入）。
      */
     @Bean
+    @ConditionalOnMissingBean
     public RequireRoleAspect requireRoleAspect() {
         return new RequireRoleAspect();
     }

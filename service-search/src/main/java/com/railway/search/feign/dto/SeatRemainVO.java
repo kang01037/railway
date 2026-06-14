@@ -12,6 +12,7 @@ import lombok.NoArgsConstructor;
 public class SeatRemainVO {
 
     private String seatType;        // BUSINESS/FIRST/SECOND/STAND
+    private java.math.BigDecimal price;
     private Integer total;
     private Integer remain;
 }

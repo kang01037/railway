@@ -56,14 +56,14 @@ class PayServiceImplTest {
         dto.setPayChannel("SIM");
 
         when(snowflakeIdWorker.nextId()).thenReturn(100L, 200L);
-        when(payProperties.getCallbackBaseUrl()).thenReturn("http://localhost:9000/api/payment/callback");
+        when(payProperties.getCallbackBaseUrl()).thenReturn("http://localhost:9000/api/payment/pay/callback");
 
         PayVO vo = payService.createPay(dto);
 
         assertNotNull(vo);
         assertEquals("O12345", vo.getOrderNo());
         assertTrue(vo.getPayNo().startsWith("P"));
-        assertTrue(vo.getPayUrl().startsWith("http://localhost:9000/api/payment/callback/sim?payNo=P"));
+        assertTrue(vo.getPayUrl().startsWith("http://localhost:9000/api/payment/pay/callback/sim?payNo=P"));
         assertTrue(vo.getPayUrl().contains("P"));
         verify(payRecordMapper, times(1)).insert(any(PayRecordDO.class));
     }

@@ -38,6 +38,7 @@ public class PayController {
 
     private final PayService payService;
 
+    @AuthIgnore
     @PostMapping("/create")
     public R<PayVO> create(@Valid @RequestBody CreatePayDTO dto) {
         return R.ok(payService.createPay(dto));

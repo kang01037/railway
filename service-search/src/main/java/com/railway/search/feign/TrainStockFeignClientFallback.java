@@ -6,7 +6,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.cloud.openfeign.FallbackFactory;
 import org.springframework.stereotype.Component;
 
-import java.util.Map;
+import java.util.Collections;
 
 /** Feign 降级：服务不可用时返 fail，由 SearchController 翻译。 */
 @Slf4j

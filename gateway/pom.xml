@@ -20,12 +20,26 @@
         <dependency>
             <groupId>com.railway</groupId>
             <artifactId>common</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-starter-web</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
 
-        <!-- Spring Cloud Gateway（reactive，webflux） -->
+        <!-- Spring Cloud Gateway（reactive，webflux）。Spring Cloud 2025.0.0 传递了 spring-boot-starter-web，
+             强制双 web 容器（servlet + webflux），导致 common 的 @ConditionalOnWebApplication(SERVLET)
+             错误匹配。显式排除以保证 gateway 是纯 webflux。 -->
         <dependency>
             <groupId>org.springframework.cloud</groupId>
             <artifactId>spring-cloud-starter-gateway</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-starter-web</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
 
         <!-- 注册中心 -->

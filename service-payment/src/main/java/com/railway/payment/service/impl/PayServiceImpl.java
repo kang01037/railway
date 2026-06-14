@@ -8,6 +8,7 @@ import com.railway.payment.config.PayProperties;
 import com.railway.payment.dto.request.CallbackDTO;
 import com.railway.payment.dto.request.CreatePayDTO;
 import com.railway.payment.entity.PayRecordDO;
+import com.railway.payment.feign.OrderFeignClient;
 import com.railway.payment.mapper.PayRecordMapper;
 import com.railway.payment.service.PayService;
 import com.railway.payment.vo.PayVO;
@@ -47,6 +48,7 @@ public class PayServiceImpl implements PayService {
     private final SnowflakeIdWorker snowflakeIdWorker;
     private final RabbitTemplate rabbitTemplate;
     private final PayProperties payProperties;
+    private final OrderFeignClient orderFeignClient;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -92,15 +94,25 @@ public class PayServiceImpl implements PayService {
             throw new BizException(ErrorCode.PAY_NOT_FOUND);
         }
 
-        // 3. 发 MQ order.paid
+        // 3. 支付成功 → 同步调 order 确认；支付失败 → 发 MQ 通知
         Map<String, Object> msg = new HashMap<>(4);
         msg.put("orderNo", record.getOrderNo());
         msg.put("payNo", record.getPayNo());
         msg.put("amount", record.getAmount());
         msg.put("success", dto.getSuccess());
-        rabbitTemplate.convertAndSend(MqConstant.ORDER_EXCHANGE, MqConstant.RK_ORDER_PAID, msg);
-        log.info("callback 发送 MQ order.paid orderNo={} payNo={} success={}",
-                record.getOrderNo(), record.getPayNo(), dto.getSuccess());
+
+        if (Boolean.TRUE.equals(dto.getSuccess())) {
+            try {
+                orderFeignClient.confirm(record.getOrderNo());
+                log.info("callback 同步确认订单成功 orderNo={}", record.getOrderNo());
+            } catch (Exception e) {
+                log.error("callback 同步确认订单失败，降级发 MQ orderNo={}", record.getOrderNo(), e);
+                rabbitTemplate.convertAndSend(MqConstant.ORDER_EXCHANGE, MqConstant.RK_ORDER_PAID, msg);
+            }
+        } else {
+            rabbitTemplate.convertAndSend(MqConstant.ORDER_EXCHANGE, MqConstant.RK_ORDER_PAID, msg);
+            log.info("callback 支付失败，发 MQ order.paid orderNo={}", record.getOrderNo());
+        }
         return true;
     }
 

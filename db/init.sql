@@ -94,6 +94,7 @@ CREATE TABLE `train_seat_stock` (
   `train_no`  VARCHAR(20) NOT NULL                                COMMENT '车次号',
   `run_date`  DATE        NOT NULL                                COMMENT '出发日期',
   `seat_type` VARCHAR(20) NOT NULL                                COMMENT 'BUSINESS/FIRST/SECOND/STAND',
+  `price`      DECIMAL(10,2) NOT NULL DEFAULT 0.00               COMMENT '票价',
   `total`     INT         NOT NULL                                COMMENT '总票数',
   `remain`    INT         NOT NULL                                COMMENT '剩余票数',
   `version`   INT         NOT NULL DEFAULT 0                      COMMENT '乐观锁版本号',
@@ -225,19 +226,19 @@ INSERT INTO `train` (`id`, `train_no`, `train_type`, `start_station`, `end_stati
 --  11. 初始数据 - 示例库存（G1234 近 3 天，3 种座位）
 --      实际生产中由 service-train-stock 的 添加车次 接口写入
 -- ============================================================
-INSERT INTO `train_seat_stock` (`id`, `train_no`, `run_date`, `seat_type`, `total`, `remain`) VALUES
-(1001, 'G1234', '2026-06-10', 'BUSINESS',  20,  20),
-(1002, 'G1234', '2026-06-10', 'FIRST',     50,  50),
-(1003, 'G1234', '2026-06-10', 'SECOND',   120, 120),
-(1004, 'G1234', '2026-06-11', 'BUSINESS',  20,  20),
-(1005, 'G1234', '2026-06-11', 'FIRST',     50,  50),
-(1006, 'G1234', '2026-06-11', 'SECOND',   120, 120),
-(1007, 'G1234', '2026-06-12', 'BUSINESS',  20,  20),
-(1008, 'G1234', '2026-06-12', 'FIRST',     50,  50),
-(1009, 'G1234', '2026-06-12', 'SECOND',   120, 120),
-(1010, 'G5678', '2026-06-10', 'BUSINESS',  20,  20),
-(1011, 'G5678', '2026-06-10', 'FIRST',     50,  50),
-(1012, 'G5678', '2026-06-10', 'SECOND',   120, 120);
+INSERT INTO `train_seat_stock` (`id`, `train_no`, `run_date`, `seat_type`, `price`, `total`, `remain`) VALUES
+(1001, 'G1234', '2026-06-10', 'BUSINESS', 1748.00,  20,  20),
+(1002, 'G1234', '2026-06-10', 'FIRST',     933.00,  50,  50),
+(1003, 'G1234', '2026-06-10', 'SECOND',    553.00, 120, 120),
+(1004, 'G1234', '2026-06-11', 'BUSINESS', 1748.00,  20,  20),
+(1005, 'G1234', '2026-06-11', 'FIRST',     933.00,  50,  50),
+(1006, 'G1234', '2026-06-11', 'SECOND',    553.00, 120, 120),
+(1007, 'G1234', '2026-06-12', 'BUSINESS', 1748.00,  20,  20),
+(1008, 'G1234', '2026-06-12', 'FIRST',     933.00,  50,  50),
+(1009, 'G1234', '2026-06-12', 'SECOND',    553.00, 120, 120),
+(1010, 'G5678', '2026-06-10', 'BUSINESS', 1748.00,  20,  20),
+(1011, 'G5678', '2026-06-10', 'FIRST',     933.00,  50,  50),
+(1012, 'G5678', '2026-06-10', 'SECOND',    553.00, 120, 120);
 
 -- ============================================================
 --  12. 初始数据 - 管理员用户（可选）

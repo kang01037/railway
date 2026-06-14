@@ -5,7 +5,6 @@ import com.railway.search.index.TrainIndex;
 
 import java.time.LocalDate;
 import java.util.List;
-import java.util.Map;
 
 /**
  * 检索服务：车次 / 座位余票。
@@ -21,5 +20,5 @@ public interface SearchService {
     /**
      * 查某车次某天的座位余票明细。Feign → service-train-stock。
      */
-    Map<String, SeatRemainVO> getSeats(String trainNo, LocalDate date);
+    List<SeatRemainVO> getSeats(String trainNo, LocalDate date);
 }

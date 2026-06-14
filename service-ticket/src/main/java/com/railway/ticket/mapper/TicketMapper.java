@@ -1,12 +1,11 @@
 package com.railway.ticket.mapper;
 
 import com.railway.ticket.entity.TicketDO;
-import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
 import java.util.List;
 
-@Mapper
+
 public interface TicketMapper {
 
     int insert(TicketDO ticket);

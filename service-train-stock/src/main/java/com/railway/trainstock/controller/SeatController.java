@@ -1,5 +1,6 @@
 package com.railway.trainstock.controller;
 
+import com.railway.common.annotation.AuthIgnore;
 import com.railway.common.model.R;
 import com.railway.trainstock.service.TrainService;
 import com.railway.trainstock.vo.SeatStockVO;
@@ -16,7 +17,7 @@ import java.time.LocalDate;
 import java.util.List;
 
 /**
- * 座位库存查询（任意用户）。网关路径：{@code /api/train/trains/{no}/seats}。
+ * 座位库存查询（任意用户 + service-search Feign 内部调用）。网关路径：{@code /api/train/trains/{no}/seats}。
  */
 @Slf4j
 @RestController
@@ -26,6 +27,7 @@ public class SeatController {
 
     private final TrainService trainService;
 
+    @AuthIgnore
     @GetMapping("/{trainNo}/seats")
     public R<List<SeatStockVO>> listSeats(
             @PathVariable String trainNo,

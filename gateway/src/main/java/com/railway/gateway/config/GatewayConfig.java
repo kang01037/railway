@@ -2,6 +2,7 @@ package com.railway.gateway.config;
 
 import com.railway.common.util.JwtUtil;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -13,6 +14,7 @@ import org.springframework.context.annotation.Configuration;
  * 网关需要的 {@link JwtUtil} {@code @Bean} 在此显式声明。
  */
 @Configuration
+@EnableConfigurationProperties(GatewayAuthProperties.class)
 public class GatewayConfig {
 
     @Bean

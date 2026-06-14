@@ -141,6 +141,28 @@ public class PassengerServiceImpl implements PassengerService {
         log.info("删除乘车人 userId={} passengerId={}", userId, id);
     }
 
+    @Override
+    public List<PassengerVO> listByIdsInternal(List<Long> ids) {
+        return ids.stream()
+                .map(id -> {
+                    PassengerDO p = passengerMapper.selectById(id);
+                    if (p == null) return null;
+                    PassengerVO vo = new PassengerVO();
+                    vo.setId(p.getId());
+                    vo.setUserId(p.getUserId());
+                    vo.setName(p.getName());
+                    vo.setIdCardType(p.getIdCardType());
+                    vo.setIdCardNo(p.getIdCardNo());  // 不脱敏
+                    vo.setPhone(p.getPhone());
+                    vo.setPassengerType(p.getPassengerType());
+                    vo.setIsDefault(p.getIsDefault());
+                    vo.setCreateTime(p.getCreateTime());
+                    return vo;
+                })
+                .filter(java.util.Objects::nonNull)
+                .toList();
+    }
+
     private PassengerVO toVO(PassengerDO p) {
         PassengerVO vo = new PassengerVO();
         vo.setId(p.getId());

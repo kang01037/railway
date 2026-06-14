@@ -2,7 +2,11 @@ package com.railway.order.service.impl;
 
 import com.github.pagehelper.PageHelper;
 import com.github.pagehelper.PageInfo;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.railway.common.constant.MqConstant;
+import com.railway.common.constant.RedisKeyConstant;
 import com.railway.common.exception.BizException;
 import com.railway.common.exception.ErrorCode;
 import com.railway.common.util.SnowflakeIdWorker;
@@ -10,12 +14,13 @@ import com.railway.common.util.UserContext;
 import com.railway.order.dto.request.CancelOrderDTO;
 import com.railway.order.dto.request.CreateOrderDTO;
 import com.railway.order.entity.OrderDO;
-import com.railway.order.feign.TicketFeignClient;
 import com.railway.order.feign.dto.PassengerVO;
 import com.railway.order.feign.dto.PayVO;
-import com.railway.order.feign.dto.TicketVO;
+import com.railway.order.feign.StockFeignClient;
+import com.railway.order.feign.dto.ConfirmStockDTO;
+import com.railway.order.feign.dto.OccupyStockDTO;
+import com.railway.order.feign.dto.ReleaseStockDTO;
 import com.railway.order.manager.OrderPayManager;
-import com.railway.order.manager.OrderStockManager;
 import com.railway.order.manager.OrderTicketManager;
 import com.railway.order.manager.OrderUserManager;
 import com.railway.order.mapper.OrderMapper;
@@ -41,11 +46,18 @@ import java.util.stream.Collectors;
 /**
  * 订单服务实现。
  *
- * <h3>create 流程的补偿点</h3>
+ * <h3>create 流程</h3>
+ * <ol>
+ *   <li>ticket.preAllocate — Redis SPOP 预占座位（统一库存管理）</li>
+ *   <li>DB 写 orders（status=0）</li>
+ *   <li>payment.createPay — 生成支付链接</li>
+ *   <li>支付成功 → confirmByOrderNo → ticket.issue 写 MySQL ticket 表</li>
+ * </ul>
+ * <h3>补偿点</h3>
  * <ul>
- *   <li>stock.occupy 成功 + 后续失败 → catch 块调 stock.release 回滚</li>
- *   <li>ticket.issue 失败 → 同上（已写 orders 时也回滚 orders）</li>
- *   <li>payment.createPay 失败 → 保留 orders（status=0），前端可重试，15min 后自动关单</li>
+ *   <li>DB 写入失败 → ticket.cancel 归还座位池</li>
+ *   <li>ticket.issue 失败 → 回滚订单状态 1→0</li>
+ *   <li>payment.createPay 失败 → 保留 orders（status=0），15min 后自动关单</li>
  * </ul>
  */
 @Slf4j
@@ -54,12 +66,14 @@ import java.util.stream.Collectors;
 public class OrderServiceImpl implements OrderService {
 
     private final OrderMapper orderMapper;
-    private final OrderStockManager stockManager;
     private final OrderTicketManager ticketManager;
     private final OrderPayManager payManager;
     private final OrderUserManager userManager;
+    private final StockFeignClient stockFeignClient;
     private final SnowflakeIdWorker snowflakeIdWorker;
     private final RabbitTemplate rabbitTemplate;
+    private final org.springframework.data.redis.core.StringRedisTemplate stringRedisTemplate;
+    private final ObjectMapper objectMapper;
 
     @Value("${order.pay-expire-minutes:15}")
     private int payExpireMinutes;
@@ -84,8 +98,37 @@ public class OrderServiceImpl implements OrderService {
         // 2. 雪花 orderNo
         String orderNo = "O" + snowflakeIdWorker.nextId();
 
-        // 3. Feign stock.occupy（失败抛 STOCK_NOT_ENOUGH）
-        stockManager.occupy(orderNo, dto.getTrainNo(), dto.getRunDate(), dto.getSeatType(), num);
+        // 3. Feign ticket.preAllocate（Redis SPOP 预占座位 + 写 MySQL ticket 表）
+        try {
+            ticketManager.preAllocate(orderNo, dto.getTrainNo(), dto.getRunDate(),
+                    dto.getSeatType(), dto.getPrice(), passengers);
+        } catch (Exception e) {
+            log.error("ticket.preAllocate 失败 orderNo={}", orderNo, e);
+            throw new BizException(ErrorCode.TICKET_ISSUE_FAILED, "预占座位失败：" + e.getMessage());
+        }
+
+        // 3.5 Feign stock.occupy（扣减 train_seat_stock.reain 余票数量）
+        try {
+            OccupyStockDTO occupyDTO = new OccupyStockDTO();
+            occupyDTO.setOrderNo(orderNo);
+            occupyDTO.setTrainNo(dto.getTrainNo());
+            occupyDTO.setRunDate(dto.getRunDate());
+            occupyDTO.setSeatType(dto.getSeatType());
+            occupyDTO.setNum(num);
+            var r = stockFeignClient.occupy(occupyDTO);
+            if (r == null || r.getCode() != 200) {
+                throw new BizException(ErrorCode.STOCK_NOT_ENOUGH,
+                        r == null ? "库存预占失败（无响应）" : r.getMessage());
+            }
+        } catch (BizException e) {
+            // 库存不足：回滚 ticket 预占
+            safeCancelTicket(orderNo);
+            throw e;
+        } catch (Exception e) {
+            log.error("stock.occupy 失败 orderNo={}", orderNo, e);
+            safeCancelTicket(orderNo);
+            throw new BizException(ErrorCode.STOCK_NOT_ENOUGH, "库存预占失败");
+        }
 
         // 4. DB 写 orders（status=0, expireTime=now+15min）
         OrderDO order = new OrderDO();
@@ -104,9 +147,10 @@ public class OrderServiceImpl implements OrderService {
         try {
             insertOrder(order);
         } catch (Exception e) {
-            // 写 DB 失败：补偿 stock.release
-            log.error("写 orders 失败，补偿 stock.release orderNo={}", orderNo, e);
-            safeRelease(orderNo, dto, num);
+            // 写 DB 失败：补偿 ticket.cancel + stock.release
+            log.error("写 orders 失败，补偿 ticket.cancel + stock.release orderNo={}", orderNo, e);
+            safeCancelTicket(orderNo);
+            safeReleaseStock(orderNo, dto.getTrainNo(), dto.getRunDate(), dto.getSeatType(), num);
             throw new BizException(ErrorCode.ORDER_CREATE_FAILED, "订单入库失败");
         }
 
@@ -115,17 +159,6 @@ public class OrderServiceImpl implements OrderService {
             sendDelayMessage(orderNo);
         } catch (Exception e) {
             log.warn("发 order.delay 失败（不影响主流程，靠前端超时 + 后续补偿）orderNo={}", orderNo, e);
-        }
-
-        // 6. Feign ticket.issue
-        try {
-            ticketManager.issue(orderNo, dto.getTrainNo(), dto.getRunDate(),
-                    dto.getSeatType(), dto.getPrice(), passengers);
-        } catch (Exception e) {
-            log.error("ticket.issue 失败，补偿 stock.release + 删 orders orderNo={}", orderNo, e);
-            safeRelease(orderNo, dto, num);
-            try { orderMapper.refundByOrderNo(orderNo); } catch (Exception ignore) {}
-            throw new BizException(ErrorCode.TICKET_ISSUE_FAILED, "出票失败：" + e.getMessage());
         }
 
         // 7. Feign payment.createPay
@@ -167,26 +200,42 @@ public class OrderServiceImpl implements OrderService {
             throw new BizException(ErrorCode.ORDER_CANCEL_FAILED, "订单状态已变更");
         }
 
-        // 2. 释放库存
-        try {
-            stockManager.release(order.getOrderNo(), order.getTrainNo(), order.getRunDate(),
-                    order.getSeatType(), order.getNum());
-        } catch (Exception e) {
-            log.error("stock.release 失败 orderNo={}", dto.getOrderNo(), e);
-        }
-
-        // 3. 票退
+        // 2. 归还座位池（ticket.cancel 会归还 Redis 座位 + 清理预占数据）
         try {
             ticketManager.cancel(order.getOrderNo());
         } catch (Exception e) {
             log.error("ticket.cancel 失败 orderNo={}", dto.getOrderNo(), e);
         }
 
+        // 3. 释放库存（stock.release 归还 train_seat_stock.remain）
+        safeReleaseStock(order.getOrderNo(), order.getTrainNo(), order.getRunDate(), order.getSeatType(), order.getNum());
+
+        // 4. 清除订单缓存
+        evictOrderCache(dto.getOrderNo(), order.getUserId());
+
         log.info("cancel 完成 orderNo={} userId={} reason={}", dto.getOrderNo(), userId, dto.getReason());
     }
 
+    /** 缓存 TTL：5 分钟 */
+    private static final Duration CACHE_TTL = Duration.ofMinutes(5);
+
     @Override
     public OrderVO getByOrderNo(String orderNo, Long userId) {
+        // 1. 查 Redis 缓存
+        String cacheKey = RedisKeyConstant.orderByOrderNoKey(orderNo);
+        String cached = stringRedisTemplate.opsForValue().get(cacheKey);
+        if (cached != null) {
+            try {
+                OrderVO vo = objectMapper.readValue(cached, OrderVO.class);
+                if (vo != null && vo.getUserId().equals(userId)) {
+                    return vo;
+                }
+            } catch (JsonProcessingException e) {
+                log.warn("订单缓存解析失败，回源查询 orderNo={}", orderNo, e);
+            }
+        }
+
+        // 2. 回源 MySQL
         OrderDO o = orderMapper.selectByOrderNo(orderNo);
         if (o == null) {
             throw new BizException(ErrorCode.ORDER_NOT_FOUND);
@@ -194,7 +243,16 @@ public class OrderServiceImpl implements OrderService {
         if (!o.getUserId().equals(userId)) {
             throw new BizException(ErrorCode.FORBIDDEN, "无权查看该订单");
         }
-        return toVO(o);
+        OrderVO vo = toVO(o);
+
+        // 3. 写入 Redis 缓存
+        try {
+            stringRedisTemplate.opsForValue().set(cacheKey,
+                    objectMapper.writeValueAsString(vo), CACHE_TTL);
+        } catch (JsonProcessingException e) {
+            log.warn("订单缓存写入失败 orderNo={}", orderNo, e);
+        }
+        return vo;
     }
 
     @Override
@@ -209,6 +267,18 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     public PageInfo<OrderVO> listByUserId(Long userId, int pageNum, int pageSize) {
+        // 1. 查 Redis 缓存
+        String cacheKey = RedisKeyConstant.orderByUserIdKey(userId, pageNum);
+        String cached = stringRedisTemplate.opsForValue().get(cacheKey);
+        if (cached != null) {
+            try {
+                return objectMapper.readValue(cached, new TypeReference<PageInfo<OrderVO>>() {});
+            } catch (JsonProcessingException e) {
+                log.warn("订单列表缓存解析失败，回源查询 userId={}", userId, e);
+            }
+        }
+
+        // 2. 回源 MySQL
         PageHelper.startPage(pageNum, pageSize);
         List<OrderDO> list = orderMapper.listByUserId(userId);
         PageInfo<OrderDO> pi = new PageInfo<>(list);
@@ -218,7 +288,49 @@ public class OrderServiceImpl implements OrderService {
         result.setPageNum(pi.getPageNum());
         result.setPageSize(pi.getPageSize());
         result.setPages(pi.getPages());
+
+        // 3. 写入 Redis 缓存
+        try {
+            stringRedisTemplate.opsForValue().set(cacheKey,
+                    objectMapper.writeValueAsString(result), CACHE_TTL);
+        } catch (JsonProcessingException e) {
+            log.warn("订单列表缓存写入失败 userId={}", userId, e);
+        }
         return result;
+    }
+
+    @Override
+    public int confirmByOrderNo(String orderNo) {
+        // 1. 状态机 0→1
+        int affected = orderMapper.confirmByOrderNo(orderNo);
+        if (affected == 0) {
+            log.info("order 状态非 0，跳过确认 orderNo={}", orderNo);
+            return 0;
+        }
+
+        // 2. 查 order 拿 runDate
+        OrderDO order = orderMapper.selectByOrderNo(orderNo);
+        if (order == null) {
+            log.error("confirmByOrderNo 后查不到 order orderNo={}", orderNo);
+            return affected;
+        }
+
+        // 3. 调 ticket.issue（更新 ticket status 0→1）
+        try {
+            ticketManager.issue(orderNo, order.getRunDate());
+        } catch (Exception e) {
+            // ticket 数据已在 preAllocate 时写入 MySQL，issue 只是状态更新
+            // 失败不影响订单状态，可后续补偿
+            log.error("ticket.issue 失败（ticket 数据已存在，可补偿）orderNo={}", orderNo, e);
+        }
+
+        // 4. 调 stock.confirm（确认库存扣减）
+        safeConfirmStock(orderNo, order.getTrainNo(), order.getRunDate(), order.getSeatType(), order.getNum());
+
+        // 清除订单缓存（状态已变更）
+        evictOrderCache(orderNo, order.getUserId());
+        log.info("confirmByOrderNo 完成 orderNo={}", orderNo);
+        return affected;
     }
 
     // ============== private ==============
@@ -242,11 +354,62 @@ public class OrderServiceImpl implements OrderService {
                 });
     }
 
-    private void safeRelease(String orderNo, CreateOrderDTO dto, int num) {
+    private void safeCancelTicket(String orderNo) {
         try {
-            stockManager.release(orderNo, dto.getTrainNo(), dto.getRunDate(), dto.getSeatType(), num);
+            ticketManager.cancel(orderNo);
         } catch (Exception e) {
-            log.error("补偿 stock.release 失败 orderNo={}", orderNo, e);
+            log.error("补偿 ticket.cancel 失败 orderNo={}", orderNo, e);
+        }
+    }
+
+    private void safeReleaseStock(String orderNo, String trainNo, java.time.LocalDate runDate,
+                                  String seatType, int num) {
+        try {
+            ReleaseStockDTO dto = new ReleaseStockDTO();
+            dto.setOrderNo(orderNo);
+            dto.setTrainNo(trainNo);
+            dto.setRunDate(runDate);
+            dto.setSeatType(seatType);
+            dto.setNum(num);
+            var r = stockFeignClient.release(dto);
+            if (r == null || r.getCode() != 200) {
+                log.error("补偿 stock.release 失败 orderNo={} msg={}", orderNo,
+                        r == null ? "null" : r.getMessage());
+            }
+        } catch (Exception e) {
+            log.error("补偿 stock.release 异常 orderNo={}", orderNo, e);
+        }
+    }
+
+    private void safeConfirmStock(String orderNo, String trainNo, java.time.LocalDate runDate,
+                                  String seatType, int num) {
+        try {
+            ConfirmStockDTO dto = new ConfirmStockDTO();
+            dto.setOrderNo(orderNo);
+            dto.setTrainNo(trainNo);
+            dto.setRunDate(runDate);
+            dto.setSeatType(seatType);
+            dto.setNum(num);
+            var r = stockFeignClient.confirm(dto);
+            if (r == null || r.getCode() != 200) {
+                log.error("stock.confirm 失败 orderNo={} msg={}", orderNo,
+                        r == null ? "null" : r.getMessage());
+            }
+        } catch (Exception e) {
+            log.error("stock.confirm 异常 orderNo={}", orderNo, e);
+        }
+    }
+
+    /** 清除订单相关缓存 */
+    private void evictOrderCache(String orderNo, Long userId) {
+        try {
+            stringRedisTemplate.delete(RedisKeyConstant.orderByOrderNoKey(orderNo));
+            // 清除用户订单列表缓存（简单实现：清除前3页）
+            for (int i = 1; i <= 3; i++) {
+                stringRedisTemplate.delete(RedisKeyConstant.orderByUserIdKey(userId, i));
+            }
+        } catch (Exception e) {
+            log.warn("清除订单缓存失败 orderNo={}", orderNo, e);
         }
     }
 

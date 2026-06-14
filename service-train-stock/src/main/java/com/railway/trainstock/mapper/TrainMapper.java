@@ -1,7 +1,6 @@
 package com.railway.trainstock.mapper;
 
 import com.railway.trainstock.entity.TrainDO;
-import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
 import java.util.List;
@@ -9,7 +8,6 @@ import java.util.List;
 /**
  * 车次表 Mapper。
  */
-@Mapper
 public interface TrainMapper {
 
     int insert(TrainDO train);

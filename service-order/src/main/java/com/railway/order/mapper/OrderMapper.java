@@ -1,12 +1,11 @@
 package com.railway.order.mapper;
 
 import com.railway.order.entity.OrderDO;
-import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
 import java.util.List;
 
-@Mapper
+
 public interface OrderMapper {
 
     int insert(OrderDO order);
@@ -38,6 +37,11 @@ public interface OrderMapper {
      * 状态机：1 → 4 已完成（暂不主动调用，留接口）。
      */
     int completeByOrderNo(@Param("orderNo") String orderNo);
+
+    /**
+     * 出票失败补偿：1 → 0 回滚到待支付。
+     */
+    int rollbackConfirm(@Param("orderNo") String orderNo);
 
     int countByUserId(@Param("userId") Long userId);
 }

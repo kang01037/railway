@@ -19,6 +19,7 @@ public class SeatStockVO {
     private LocalDate runDate;
 
     private String seatType;
+    private java.math.BigDecimal price;
     private Integer total;
     private Integer remain;
 }

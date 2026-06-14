@@ -15,7 +15,7 @@ import java.util.List;
  * </ul>
  */
 @Data
-@ConfigurationProperties(prefix = "gateway")
+@ConfigurationProperties(prefix = "gateway-auth")
 public class GatewayAuthProperties {
 
     /** 白名单路径（Ant 风格，命中即放行） */

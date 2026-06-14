@@ -7,6 +7,7 @@
         <result column="train_no"   property="trainNo"/>
         <result column="run_date"   property="runDate"/>
         <result column="seat_type"  property="seatType"/>
+        <result column="price"      property="price"/>
         <result column="total"      property="total"/>
         <result column="remain"     property="remain"/>
         <result column="version"    property="version"/>
@@ -15,14 +16,14 @@
     </resultMap>
 
     <sql id="Base_Column_List">
-        id, train_no, run_date, seat_type, total, remain, version, create_time, update_time
+        id, train_no, run_date, seat_type, price, total, remain, version, create_time, update_time
     </sql>
 
     <insert id="insert" parameterType="com.railway.trainstock.entity.TrainSeatStockDO">
         INSERT INTO train_seat_stock (
-            id, train_no, run_date, seat_type, total, remain, version, create_time, update_time
+            id, train_no, run_date, seat_type, price, total, remain, version, create_time, update_time
         ) VALUES (
-            #{id}, #{trainNo}, #{runDate}, #{seatType}, #{total}, #{remain}, 0, #{createTime}, #{updateTime}
+            #{id}, #{trainNo}, #{runDate}, #{seatType}, #{price}, #{total}, #{remain}, 0, #{createTime}, #{updateTime}
         )
     </insert>
 

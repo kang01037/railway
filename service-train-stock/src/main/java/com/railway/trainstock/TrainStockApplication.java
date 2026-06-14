@@ -1,5 +1,6 @@
 package com.railway.trainstock;
 
+import org.mybatis.spring.boot.autoconfigure.MybatisAutoConfiguration;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.cloud.client.discovery.EnableDiscoveryClient;
@@ -10,7 +11,7 @@ import org.springframework.cloud.client.discovery.EnableDiscoveryClient;
  * <p>本服务不主动调用其他服务（出站 Feign 暂不开）；后续 service-order 调
  * {@code /stock/occupy} / {@code /stock/release} 等内部接口（标 {@code @AuthIgnore}）。
  */
-@SpringBootApplication
+@SpringBootApplication(exclude = {MybatisAutoConfiguration.class})
 @EnableDiscoveryClient
 public class TrainStockApplication {
 
