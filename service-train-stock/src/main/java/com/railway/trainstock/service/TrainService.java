@@ -26,6 +26,9 @@ public interface TrainService {
     /** 按车次号查询某天的座位库存列表。 */
     List<SeatStockVO> listSeats(String trainNo, LocalDate runDate);
 
+    /** 按车次号查询所有日期的座位库存列表（用于 ES 同步）。 */
+    List<SeatStockVO> listAllSeats(String trainNo);
+
     /** 条件查询车次。 */
     List<TrainVO> queryTrains(TrainQuery query);
 

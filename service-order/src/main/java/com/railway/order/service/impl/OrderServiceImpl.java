@@ -89,48 +89,10 @@ public class OrderServiceImpl implements OrderService {
         int num = dto.getPassengerIds().size();
         BigDecimal amount = dto.getPrice().multiply(BigDecimal.valueOf(num));
 
-        // 1. 拿乘客信息（降级容错：拿不到就给空，前端兜底）
-        Map<Long, PassengerVO> passengerMap = userManager.listByIds(dto.getPassengerIds());
-        List<PassengerVO> passengers = dto.getPassengerIds().stream()
-                .map(id -> passengerMap.getOrDefault(id, defaultPassenger(id)))
-                .toList();
-
-        // 2. 雪花 orderNo
+        // 1. 雪花 orderNo
         String orderNo = "O" + snowflakeIdWorker.nextId();
 
-        // 3. Feign ticket.preAllocate（Redis SPOP 预占座位 + 写 MySQL ticket 表）
-        try {
-            ticketManager.preAllocate(orderNo, dto.getTrainNo(), dto.getRunDate(),
-                    dto.getSeatType(), dto.getPrice(), passengers);
-        } catch (Exception e) {
-            log.error("ticket.preAllocate 失败 orderNo={}", orderNo, e);
-            throw new BizException(ErrorCode.TICKET_ISSUE_FAILED, "预占座位失败：" + e.getMessage());
-        }
-
-        // 3.5 Feign stock.occupy（扣减 train_seat_stock.reain 余票数量）
-        try {
-            OccupyStockDTO occupyDTO = new OccupyStockDTO();
-            occupyDTO.setOrderNo(orderNo);
-            occupyDTO.setTrainNo(dto.getTrainNo());
-            occupyDTO.setRunDate(dto.getRunDate());
-            occupyDTO.setSeatType(dto.getSeatType());
-            occupyDTO.setNum(num);
-            var r = stockFeignClient.occupy(occupyDTO);
-            if (r == null || r.getCode() != 200) {
-                throw new BizException(ErrorCode.STOCK_NOT_ENOUGH,
-                        r == null ? "库存预占失败（无响应）" : r.getMessage());
-            }
-        } catch (BizException e) {
-            // 库存不足：回滚 ticket 预占
-            safeCancelTicket(orderNo);
-            throw e;
-        } catch (Exception e) {
-            log.error("stock.occupy 失败 orderNo={}", orderNo, e);
-            safeCancelTicket(orderNo);
-            throw new BizException(ErrorCode.STOCK_NOT_ENOUGH, "库存预占失败");
-        }
-
-        // 4. DB 写 orders（status=0, expireTime=now+15min）
+        // 2. 先写订单（status=4 排队中），让前端可以轮询
         OrderDO order = new OrderDO();
         order.setId(snowflakeIdWorker.nextId());
         order.setOrderNo(orderNo);
@@ -140,44 +102,44 @@ public class OrderServiceImpl implements OrderService {
         order.setSeatType(dto.getSeatType());
         order.setNum(num);
         order.setAmount(amount);
-        order.setStatus(0);
+        order.setStatus(4);  // 排队中
         order.setExpireTime(LocalDateTime.now().plusMinutes(payExpireMinutes));
         order.setCreateTime(LocalDateTime.now());
         order.setUpdateTime(LocalDateTime.now());
         try {
             insertOrder(order);
         } catch (Exception e) {
-            // 写 DB 失败：补偿 ticket.cancel + stock.release
-            log.error("写 orders 失败，补偿 ticket.cancel + stock.release orderNo={}", orderNo, e);
-            safeCancelTicket(orderNo);
-            safeReleaseStock(orderNo, dto.getTrainNo(), dto.getRunDate(), dto.getSeatType(), num);
-            throw new BizException(ErrorCode.ORDER_CREATE_FAILED, "订单入库失败");
+            log.error("写 orders 失败 orderNo={}", orderNo, e);
+            throw new BizException(ErrorCode.ORDER_CREATE_FAILED, "订单创建失败");
         }
 
-        // 5. 发 MQ order.delay（带 orderNo，TTL 15min）
+        // 3. 发送 MQ 消息（削峰填谷）
+        Map<String, Object> msg = new HashMap<>();
+        msg.put("orderNo", orderNo);
+        msg.put("userId", userId);
+        msg.put("trainNo", dto.getTrainNo());
+        msg.put("runDate", dto.getRunDate().toString());
+        msg.put("seatType", dto.getSeatType());
+        msg.put("num", num);
+        msg.put("price", dto.getPrice());
+        msg.put("amount", amount);
+        msg.put("passengerIds", dto.getPassengerIds());  // 添加乘客ID列表
         try {
-            sendDelayMessage(orderNo);
+            rabbitTemplate.convertAndSend(MqConstant.ORDER_EXCHANGE, MqConstant.RK_ORDER_CREATE, msg);
+            log.info("发送订单创建消息 orderNo={}", orderNo);
         } catch (Exception e) {
-            log.warn("发 order.delay 失败（不影响主流程，靠前端超时 + 后续补偿）orderNo={}", orderNo, e);
+            log.error("发送 MQ 失败，删除订单 orderNo={}", orderNo, e);
+            orderMapper.deleteByOrderNo(orderNo);
+            throw new BizException(ErrorCode.ORDER_CREATE_FAILED, "订单创建失败");
         }
 
-        // 7. Feign payment.createPay
-        PayVO payVo;
-        try {
-            payVo = payManager.createPay(orderNo, amount);
-        } catch (Exception e) {
-            // 保留 order status=0，前端可重试 payUrl，15min 后自动关单
-            log.warn("payment.createPay 失败 orderNo={}（不阻塞，前端可重试）", orderNo, e);
-            payVo = null;
-        }
-
-        // 8. 返回
+        // 4. 返回排队中状态
         CreateOrderResultVO result = new CreateOrderResultVO();
         result.setOrderNo(orderNo);
+        result.setStatus(4);  // 排队中
         result.setAmount(amount);
         result.setExpireTime(order.getExpireTime());
-        result.setPayUrl(payVo == null ? null : payVo.getPayUrl());
-        log.info("createOrder 完成 orderNo={} amount={} payUrl={}", orderNo, amount, result.getPayUrl());
+        log.info("createOrder 排队中 orderNo={} amount={}", orderNo, amount);
         return result;
     }
 

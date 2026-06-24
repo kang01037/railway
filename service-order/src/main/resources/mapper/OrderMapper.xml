@@ -80,4 +80,15 @@
         WHERE order_no = #{orderNo} AND status = 1
     </update>
 
+    <!-- 通用状态更新（乐观锁） -->
+    <update id="updateStatus">
+        UPDATE orders SET status = #{toStatus}, update_time = NOW()
+        WHERE order_no = #{orderNo} AND status = #{fromStatus}
+    </update>
+
+    <!-- 删除订单（创建失败时） -->
+    <delete id="deleteByOrderNo">
+        DELETE FROM orders WHERE order_no = #{orderNo}
+    </delete>
+
 </mapper>

@@ -39,6 +39,19 @@ public class RabbitConfig {
         return new TopicExchange(MqConstant.ORDER_EXCHANGE, true, false);
     }
 
+    // 削峰填谷：订单创建队列（prefetch=100 控制并发）
+    @Bean
+    public Queue orderCreateQueue() {
+        return QueueBuilder.durable(MqConstant.ORDER_CREATE_QUEUE)
+                .withArgument("x-message-ttl", 60_000)  // 消息 60 秒过期
+                .build();
+    }
+
+    @Bean
+    public Binding orderCreateBinding(Queue orderCreateQueue, TopicExchange orderExchange) {
+        return BindingBuilder.bind(orderCreateQueue).to(orderExchange).with(MqConstant.RK_ORDER_CREATE);
+    }
+
     // 收 payment.callback 发来的 order.paid
     @Bean
     public Queue orderPaidQueue() {

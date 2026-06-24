@@ -60,6 +60,12 @@
             <artifactId>spring-cloud-starter-loadbalancer</artifactId>
         </dependency>
 
+        <!-- Redis（RequestRateLimiter 限流需要） -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis-reactive</artifactId>
+        </dependency>
+
         <!-- hutool 用于生成 TraceId -->
         <dependency>
             <groupId>cn.hutool</groupId>

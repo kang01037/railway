@@ -1,4 +1,4 @@
-﻿server:
+server:
   port: 9100
 
 spring:
@@ -10,12 +10,9 @@ spring:
         server-addr: 127.0.0.1:8848
       config:
         enabled: false
-  elasticsearch:
-    uris: http://127.0.0.1:9200
-    connection-timeout: 2s
-    socket-timeout: 5s
 
-# Feign锛氳皟 service-train-stock 鎷垮骇浣嶄綑绁?feign:
+# Feign：调 service-train-stock 拿座位余票
+feign:
   client:
     config:
       default:
@@ -37,4 +34,3 @@ management:
 logging:
   level:
     com.railway: debug
-    org.springframework.data.elasticsearch.client: info

@@ -34,4 +34,11 @@ public class SeatController {
             @RequestParam("runDate") @DateTimeFormat(pattern = "yyyy-MM-dd") LocalDate runDate) {
         return R.ok(trainService.listSeats(trainNo, runDate));
     }
+
+    /** 查询某车次所有日期的库存（内部调用，用于 ES 同步） */
+    @AuthIgnore
+    @GetMapping("/{trainNo}/seats/all")
+    public R<List<SeatStockVO>> listAllSeats(@PathVariable String trainNo) {
+        return R.ok(trainService.listAllSeats(trainNo));
+    }
 }

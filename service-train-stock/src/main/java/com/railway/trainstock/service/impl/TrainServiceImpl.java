@@ -124,6 +124,13 @@ public class TrainServiceImpl implements TrainService {
     }
 
     @Override
+    public List<SeatStockVO> listAllSeats(String trainNo) {
+        return stockMapper.listByTrainNo(trainNo).stream()
+                .map(this::toSeatVO)
+                .toList();
+    }
+
+    @Override
     public List<TrainVO> queryTrains(TrainQuery query) {
         if (query == null) {
             query = new TrainQuery();

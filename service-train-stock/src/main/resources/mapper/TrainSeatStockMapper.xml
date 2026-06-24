@@ -49,6 +49,12 @@
         ORDER BY run_date ASC, FIELD(seat_type, 'BUSINESS', 'FIRST', 'SECOND', 'STAND')
     </select>
 
+    <select id="listByRunDate" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/> FROM train_seat_stock
+        WHERE run_date = #{runDate}
+        ORDER BY train_no ASC, FIELD(seat_type, 'BUSINESS', 'FIRST', 'SECOND', 'STAND')
+    </select>
+
     <!-- 乐观锁扣减：remain &gt;= num 才扣；返回受影响行数 -->
     <update id="decreaseRemainByVersion">
         UPDATE train_seat_stock
@@ -67,6 +73,25 @@
           AND run_date  = #{runDate}
           AND seat_type = #{seatType}
           AND version   = #{version}
+    </update>
+
+    <!-- 无条件扣减（分布式锁已保证互斥，无需 version） -->
+    <update id="decreaseRemain">
+        UPDATE train_seat_stock
+        SET remain = remain - #{num}, version = version + 1
+        WHERE train_no = #{trainNo}
+          AND run_date  = #{runDate}
+          AND seat_type = #{seatType}
+          AND remain    &gt;= #{num}
+    </update>
+
+    <!-- 无条件释放（分布式锁已保证互斥，无需 version） -->
+    <update id="increaseRemain">
+        UPDATE train_seat_stock
+        SET remain = remain + #{num}, version = version + 1
+        WHERE train_no = #{trainNo}
+          AND run_date  = #{runDate}
+          AND seat_type = #{seatType}
     </update>
 
 </mapper>

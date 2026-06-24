@@ -35,7 +35,7 @@ import static org.mockito.Mockito.when;
 
 /**
  * StockServiceImpl 单测：occupy / confirm / release 关键分支。
- * <p>StockManager 内部用 Redis Lua + StringRedisTemplate，**这里 mock** 之。
+ * <p>并发控制方案：Redis 分布式锁 + Lua 脚本（StockManager 内部 mock）。
  */
 @ExtendWith(MockitoExtension.class)
 class StockServiceImplTest {
@@ -75,14 +75,14 @@ class StockServiceImplTest {
         when(stockMapper.selectByKey("G1234", dto.getRunDate(), "SECOND")).thenReturn(db);
         when(stockManager.occupy(anyString(), any(), anyString(), eq(2))).thenReturn(1L);
         when(stockManager.getCurrent(anyString(), any(), anyString())).thenReturn(48L);
-        when(stockMapper.decreaseRemainByVersion("G1234", dto.getRunDate(), "SECOND", 2, 0)).thenReturn(1);
+        when(stockMapper.decreaseRemain("G1234", dto.getRunDate(), "SECOND", 2)).thenReturn(1);
         when(snowflakeIdWorker.nextId()).thenReturn(999L);
 
         OccupyVO vo = stockService.occupy(dto);
         assertNotNull(vo);
         assertEquals(48L, vo.getRemainAfter());
         verify(stockFlowMapper, times(1)).insert(any());   // 写流水
-        verify(stockMapper, times(1)).decreaseRemainByVersion("G1234", dto.getRunDate(), "SECOND", 2, 0);
+        verify(stockMapper, times(1)).decreaseRemain("G1234", dto.getRunDate(), "SECOND", 2);
     }
 
     @Test
@@ -117,7 +117,23 @@ class StockServiceImplTest {
     }
 
     @Test
-    void occupy_dbOptimisticLockConflict_rollsBackRedis() {
+    void occupy_lockTimeout_throwsConflict() {
+        OccupyDTO dto = new OccupyDTO();
+        dto.setOrderNo("O1");
+        dto.setTrainNo("G1234");
+        dto.setRunDate(LocalDate.of(2026, 6, 10));
+        dto.setSeatType("SECOND");
+        dto.setNum(2);
+        when(stockMapper.selectByKey(anyString(), any(), anyString())).thenReturn(sampleStock(50, 0));
+        when(stockManager.occupy(anyString(), any(), anyString(), eq(2))).thenReturn(-2L);
+
+        BizException ex = assertThrows(BizException.class, () -> stockService.occupy(dto));
+        assertEquals(ErrorCode.STOCK_VERSION_CONFLICT.getCode(), ex.getCode());
+        verify(stockFlowMapper, never()).insert(any());
+    }
+
+    @Test
+    void occupy_dbDecreaseFails_rollsBackRedis() {
         OccupyDTO dto = new OccupyDTO();
         dto.setOrderNo("O1");
         dto.setTrainNo("G1234");
@@ -126,10 +142,10 @@ class StockServiceImplTest {
         dto.setNum(2);
         when(stockMapper.selectByKey(anyString(), any(), anyString())).thenReturn(sampleStock(50, 0));
         when(stockManager.occupy(anyString(), any(), anyString(), eq(2))).thenReturn(1L);
-        when(stockMapper.decreaseRemainByVersion(anyString(), any(), anyString(), eq(2), eq(0))).thenReturn(0);
+        when(stockMapper.decreaseRemain(anyString(), any(), anyString(), eq(2))).thenReturn(0);
 
         BizException ex = assertThrows(BizException.class, () -> stockService.occupy(dto));
-        assertEquals(ErrorCode.STOCK_VERSION_CONFLICT.getCode(), ex.getCode());
+        assertEquals(ErrorCode.STOCK_NOT_ENOUGH.getCode(), ex.getCode());
         // 关键：回滚 Redis 释放同样数量
         verify(stockManager, times(1)).release(anyString(), any(), anyString(), eq(2));
     }
@@ -170,7 +186,7 @@ class StockServiceImplTest {
         dto.setNum(2);
         when(stockMapper.selectByKey(anyString(), any(), anyString())).thenReturn(sampleStock(48, 1));
         when(stockManager.release(anyString(), any(), anyString(), eq(2))).thenReturn(1L);
-        when(stockMapper.increaseRemainByVersion(anyString(), any(), anyString(), eq(2), eq(1))).thenReturn(1);
+        when(stockMapper.increaseRemain(anyString(), any(), anyString(), eq(2))).thenReturn(1);
         when(snowflakeIdWorker.nextId()).thenReturn(2L);
 
         stockService.release(dto);
@@ -183,7 +199,7 @@ class StockServiceImplTest {
     }
 
     @Test
-    void release_dbConflict_warnsButDoesNotThrow() {
+    void release_lockTimeout_throwsConflict() {
         ReleaseDTO dto = new ReleaseDTO();
         dto.setOrderNo("O1");
         dto.setTrainNo("G1234");
@@ -191,14 +207,11 @@ class StockServiceImplTest {
         dto.setSeatType("SECOND");
         dto.setNum(2);
         when(stockMapper.selectByKey(anyString(), any(), anyString())).thenReturn(sampleStock(48, 1));
-        when(stockManager.release(anyString(), any(), anyString(), eq(2))).thenReturn(1L);
-        when(stockMapper.increaseRemainByVersion(anyString(), any(), anyString(), eq(2), eq(1))).thenReturn(0);
-        when(snowflakeIdWorker.nextId()).thenReturn(2L);
+        when(stockManager.release(anyString(), any(), anyString(), eq(2))).thenReturn(-2L);
 
-        // 不抛异常（Redis 已成功，DB 失败仅 warn）
-        stockService.release(dto);
-
-        verify(stockFlowMapper, times(1)).insert(any());
+        BizException ex = assertThrows(BizException.class, () -> stockService.release(dto));
+        assertEquals(ErrorCode.STOCK_VERSION_CONFLICT.getCode(), ex.getCode());
+        verify(stockFlowMapper, never()).insert(any());
     }
 
     @Test

@@ -4,6 +4,10 @@ server:
 spring:
   application:
     name: gateway
+  redis:
+    host: 127.0.0.1
+    port: 6379
+    database: 0
   cloud:
     nacos:
       discovery:
@@ -16,6 +20,12 @@ spring:
       discovery:
         locator:
           enabled: false
+      default-filters:
+        - name: RequestRateLimiter
+          args:
+            redis-rate-limiter.replenishRate: 100  # 每秒令牌数
+            redis-rate-limiter.burstCapacity: 200  # 突发容量
+            key-resolver: "#{@userKeyResolver}"    # 按用户限流
       routes:
         - id: user
           uri: lb://service-user
@@ -81,7 +91,7 @@ gateway-auth:
 # JWT 閰嶇疆锛堝繀椤讳笌 service-user 涓€鑷达紝鍚﹀垯 token 鏍￠獙澶辫触锛?jwt:
   secret: 0123456789abcdef0123456789abcdef0123456789abcdef
   expire-minutes: 120
-  issuer: railway
+  issuer: railway-real
 
 # 闆姳锛氱綉鍏宠嚜宸辩敤涓嶅埌锛屼絾寮曞叆 common 鍖呬細甯?SnowflakeIdWorker锛岃繖閲屾樉寮忕粰涓€?snowflake:
   worker-id: 0

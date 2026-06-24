@@ -94,25 +94,16 @@ public class PayServiceImpl implements PayService {
             throw new BizException(ErrorCode.PAY_NOT_FOUND);
         }
 
-        // 3. 支付成功 → 同步调 order 确认；支付失败 → 发 MQ 通知
+        // 3. 异步化：直接发 MQ，不再同步调用 order 服务
         Map<String, Object> msg = new HashMap<>(4);
         msg.put("orderNo", record.getOrderNo());
         msg.put("payNo", record.getPayNo());
         msg.put("amount", record.getAmount());
         msg.put("success", dto.getSuccess());
 
-        if (Boolean.TRUE.equals(dto.getSuccess())) {
-            try {
-                orderFeignClient.confirm(record.getOrderNo());
-                log.info("callback 同步确认订单成功 orderNo={}", record.getOrderNo());
-            } catch (Exception e) {
-                log.error("callback 同步确认订单失败，降级发 MQ orderNo={}", record.getOrderNo(), e);
-                rabbitTemplate.convertAndSend(MqConstant.ORDER_EXCHANGE, MqConstant.RK_ORDER_PAID, msg);
-            }
-        } else {
-            rabbitTemplate.convertAndSend(MqConstant.ORDER_EXCHANGE, MqConstant.RK_ORDER_PAID, msg);
-            log.info("callback 支付失败，发 MQ order.paid orderNo={}", record.getOrderNo());
-        }
+        rabbitTemplate.convertAndSend(MqConstant.ORDER_EXCHANGE, MqConstant.RK_ORDER_PAID, msg);
+        log.info("callback 异步化：发送 MQ order.paid orderNo={} success={}", record.getOrderNo(), dto.getSuccess());
+
         return true;
     }
 

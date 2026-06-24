@@ -8,7 +8,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 /**
  * Feign 调 service-order（支付成功后同步确认订单）。
  */
-@FeignClient(name = "service-order", path = "/orders")
+@FeignClient(name = "service-order", path = "/orders",
+        fallbackFactory = OrderFeignClientFallback.class)
 public interface OrderFeignClient {
 
     @PostMapping("/internal/confirm")

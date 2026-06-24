@@ -1,5 +1,6 @@
 package com.railway.trainstock.controller;
 
+import com.railway.common.annotation.AuthIgnore;
 import com.railway.common.annotation.RequireRole;
 import com.railway.common.model.R;
 import com.railway.trainstock.dto.query.TrainQuery;
@@ -58,6 +59,7 @@ public class TrainController {
     }
 
     /** 条件查询车次（任意用户） */
+    @AuthIgnore
     @GetMapping
     public R<List<TrainVO>> query(TrainQuery query) {
         return R.ok(trainService.queryTrains(query));

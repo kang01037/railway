@@ -25,6 +25,9 @@ public interface TrainSeatStockMapper {
     /** 某车次所有库存（不限日期） */
     List<TrainSeatStockDO> listByTrainNo(@Param("trainNo") String trainNo);
 
+    /** 某日期的所有库存（用于缓存预热） */
+    List<TrainSeatStockDO> listByRunDate(@Param("runDate") LocalDate runDate);
+
     /**
      * 乐观锁扣减：remain &gt;= num 才更新；返回受影响行数（0 = 冲突或库存不足）。
      * 同时把 version +1。
@@ -43,4 +46,21 @@ public interface TrainSeatStockMapper {
                                 @Param("seatType") String seatType,
                                 @Param("num") int num,
                                 @Param("version") int version);
+
+    /**
+     * 无条件扣减（分布式锁已保证互斥，无需 version）。
+     * remain &gt;= num 才扣；返回受影响行数。
+     */
+    int decreaseRemain(@Param("trainNo") String trainNo,
+                       @Param("runDate") LocalDate runDate,
+                       @Param("seatType") String seatType,
+                       @Param("num") int num);
+
+    /**
+     * 无条件释放（分布式锁已保证互斥，无需 version）。
+     */
+    int increaseRemain(@Param("trainNo") String trainNo,
+                       @Param("runDate") LocalDate runDate,
+                       @Param("seatType") String seatType,
+                       @Param("num") int num);
 }

@@ -41,6 +41,12 @@
             <artifactId>spring-cloud-starter-loadbalancer</artifactId>
         </dependency>
 
+        <!-- Resilience4j：Feign 熔断降级 -->
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-circuitbreaker-resilience4j</artifactId>
+        </dependency>
+
         <!-- RabbitMQ：收 order.paid、发 order.delay -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

@@ -1,4 +1,4 @@
-﻿server:
+server:
   port: 9105
 
 spring:
@@ -47,14 +47,48 @@ pagehelper:
   reasonable: true
   support-methods-arguments: true
 
-# Feign锛氳皟涓嬫父 4 涓湇鍔★紝3s 杩炴帴 5s 璇?feign:
+# Feign锛氳皟涓嬫父 4 涓湇鍔★紝3s 杩炴帴 5s 璇?feign:
   client:
     config:
       default:
         connect-timeout: 3000
         read-timeout: 5000
         logger-level: basic
-  # hystrix 涓嶇敤浜嗭紝渚濊禆 FallbackFactory
+        circuitbreaker:
+          enabled: true
+
+# Resilience4j 熔断配置
+resilience4j:
+  circuitbreaker:
+    configs:
+      default:
+        slidingWindowSize: 10
+        failureRateThreshold: 50
+        waitDurationInOpenState: 30000
+        permittedNumberOfCallsInHalfOpenState: 3
+        automaticTransitionFromOpenToHalfOpenEnabled: true
+    instances:
+      service-ticket:
+        baseConfig: default
+      service-train-stock:
+        baseConfig: default
+      service-payment:
+        baseConfig: default
+      service-user:
+        baseConfig: default
+  timelimiter:
+    configs:
+      default:
+        timeoutDuration: 5s
+    instances:
+      service-ticket:
+        baseConfig: default
+      service-train-stock:
+        baseConfig: default
+      service-payment:
+        baseConfig: default
+      service-user:
+        baseConfig: default
 
 jwt:
   secret: 0123456789abcdef0123456789abcdef0123456789abcdef

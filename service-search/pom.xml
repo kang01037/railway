@@ -13,7 +13,7 @@
     <artifactId>service-search</artifactId>
     <packaging>jar</packaging>
     <name>railway-service-search</name>
-    <description>ES 检索服务（车次 / 票 / 座位余票）</description>
+    <description>检索服务（MySQL + Redis 实时余票）</description>
 
     <dependencies>
         <dependency>
@@ -45,12 +45,6 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
-        </dependency>
-
-        <!-- Elasticsearch -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-data-elasticsearch</artifactId>
         </dependency>
 
         <dependency>

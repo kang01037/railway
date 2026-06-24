@@ -44,4 +44,16 @@ public interface OrderMapper {
     int rollbackConfirm(@Param("orderNo") String orderNo);
 
     int countByUserId(@Param("userId") Long userId);
+
+    /**
+     * 通用状态更新（乐观锁）。
+     */
+    int updateStatus(@Param("orderNo") String orderNo,
+                     @Param("fromStatus") int fromStatus,
+                     @Param("toStatus") int toStatus);
+
+    /**
+     * 删除订单（创建失败时）。
+     */
+    int deleteByOrderNo(@Param("orderNo") String orderNo);
 }

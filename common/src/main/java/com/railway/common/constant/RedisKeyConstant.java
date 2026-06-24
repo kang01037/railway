@@ -10,16 +10,22 @@ public final class RedisKeyConstant {
     public static final String IDEMPOTENT = "IDEMPOTENT:";
     public static final String USER_LOGIN = "USER_LOGIN:";
     public static final String STOCK = "STOCK:";
+    public static final String STOCK_LOCK = "STOCK_LOCK:";
     public static final String SEAT_POOL = "SEAT_POOL:";
     public static final String SEAT_RESERVE = "SEAT_RESERVE:";
     public static final String TICKET_CACHE = "TICKET_CACHE:";
     public static final String ORDER_CACHE = "ORDER_CACHE:";
+    public static final String ORDER_PAY_URL = "ORDER_PAY_URL:";
 
     private RedisKeyConstant() {
     }
 
     public static String stockKey(String trainNo, String runDate, String seatType) {
         return STOCK + trainNo + ":" + runDate + ":" + seatType;
+    }
+
+    public static String stockLockKey(String trainNo, String runDate, String seatType) {
+        return STOCK_LOCK + trainNo + ":" + runDate + ":" + seatType;
     }
 
     public static String seatKey(String trainNo, String runDate, String seatType) {
